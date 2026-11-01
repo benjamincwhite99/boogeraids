@@ -43,6 +43,11 @@
   },
   "likert_canonical_labels": {"1": "Strongly disagree", "2": "Disagree", "3": "Neither agree nor disagree", "4": "Agree", "5": "Strongly agree"},
 
+  "dates": {
+    "_about": "Dates are parsed one value at a time from a fixed list of unambiguous formats (e.g. 2026-04-28, April 28, 2026), so row order never matters. Slash dates like 04/05/2026 are ambiguous; they are read with slash_date_order ('MDY' = US month/day/year, as in this English (United States) Forms export, or 'DMY'). Set it to null to flag every slash date instead. Anything else is left blank and flagged, never guessed.",
+    "slash_date_order": "MDY"
+  },
+
   "language_map": {
     "_about": "Matched on the start of the lower-cased label.",
     "english": "English",

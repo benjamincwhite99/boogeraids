@@ -12,10 +12,10 @@ The survey export, case materials and all outputs are **not** in this repository
 ## Run it
 
 ```bash
-pip install pandas openpyxl
+pip install -r requirements.txt       # versions this was built and tested with (Python 3.9)
 python3 clean.py                       # cleans BuildFest_EveryMind_Survey_Data_FULL.xlsx
 python3 clean.py new_export.xlsx       # any newer export (.xlsx or .csv); column order doesn't matter
-python3 validate_clean.py              # independent check of the output against the raw file
+python3 validate_clean.py              # independent check of the output against the raw file (add --config if you used one)
 python3 tests/test_edge_cases.py       # synthetic edge cases a future export might contain (no real data needed)
 ```
 
@@ -30,6 +30,11 @@ Outputs go to `output/`:
 | `change_log.csv` | Every raw → cleaned value mapping with counts and the rule applied. |
 | `group_tables.csv` | Every group comparison in the report in long format (group, members, n, value, suppression status). Ready for a dashboard. |
 | `data_quality_report.md` | Issues found, what was done, completeness, sample composition, response-coverage patterns, and baseline figures with sample sizes. |
+| `run_manifest.json` | Which input, config and code produced this bundle, package versions, and a fingerprint (SHA-256) of every file above. |
+
+**A run publishes all of these together or not at all.** Everything is built in a temporary folder and moved into `output/` only after every step succeeds. If a run fails, `output/` keeps the previous successful bundle unchanged. `validate_clean.py` checks every file against `run_manifest.json`, so files from different runs can't be mixed unnoticed. Other files you keep in `output/` (e.g. review notes) are left alone.
+
+The workbook stores all survey text as plain text. A comment such as `=1+1` stays text and never becomes an Excel formula.
 
 ## Rules the pipeline follows
 
@@ -37,13 +42,19 @@ Outputs go to `output/`:
 - **Doubtful responses are flagged, never excluded by default.** Primary figures use every valid answer. Review flags (possible scale reversal, duplicates, repeated IDs, very short or long completions) feed a side-by-side sensitivity check (`in_sensitivity_sample`).
 - **Ambiguous rating labels ("Very agree", "Satisfied") are left unscored** until EveryMind confirms their meaning. The report counts them and shows what changes if they're scored.
 - **Self-rated change is reported item by item**, with valid pairs only, and described as retrospective self-report, not measured learning.
-- **Small groups:** groups under 10 are pooled into "Other (…)", cells under 10 are suppressed with complementary suppression (nothing recoverable by subtraction), and groups of 10–29 are labeled "thin".
+- **Small groups:** groups under 10 are pooled into "Other (…)", and cells under 10 are suppressed, with complementary suppression so that nothing is recoverable by subtraction **within a table**. Comparing different tables could still narrow down a small group, so treat these as internal working files, not an approved public release. Each figure is labeled "⚠ thin" when **its own** valid n is 10–29.
 - **Comments are never reworded.** The exact export text is in `*_original`, and response types are in `*_type`. The `*_redacted` columns replace listed names (any capitalization), "Mr./Ms./Dr. + name", emails and phone numbers. **This is a preliminary, automated pass, so read every excerpt before quoting or sharing it.**
+- **Dates are read one value at a time** from a fixed list of unambiguous formats (`2026-04-28`, `April 28, 2026`, …), so row order never matters. Slash dates use the order set in `dates.slash_date_order` (US month/day/year by default). Anything else is left blank and flagged.
+- **Possible duplicates** compare the actual answers (all role selections, the exact rating labels, full comments), and point to the first copy by `duplicate_of_row`, which works even if it has no ID.
 - **Invalid answers are flagged, never forced.** Unknown labels, counties and roles, and 0–10 answers that aren't whole numbers in range, are left blank, flagged `flag_unmapped_value`, and listed in the report. A role answer that mixes known and unknown selections (e.g. "Student;Volunteer") goes into its own "Includes unrecognized role" group, so it never counts as a single-role student.
 
 ## Confirming an ambiguous label
 
 If EveryMind confirms what "Very agree" or "Satisfied" meant, set its score in `likert_map` in `cleaning_config.json` and re-run. It is then scored, logged and reported like any other label.
+
+## Changing the config
+
+Rating labels, role labels, language prefixes, county aliases, thresholds and the slash-date order can all be changed in `cleaning_config.json`. `clean.py` checks the config first and stops with a clear message if a value can't be applied (e.g. a rating of 7). `validate_clean.py` reads the same settings and applies them with its own code. Pass it the same `--config` if you used one.
 
 ## When a new export has something unexpected
 
@@ -51,4 +62,4 @@ If a new label, county or role shows up, the script prints a warning. It leaves 
 
 ## Who runs it and when
 
-Program staff can run it after each batch of trainings (e.g. monthly) with Python installed. Review §2/§2a of the report for new issues, then use `clean_responses.csv` for analysis or the dashboard.
+Program staff can run it after each batch of trainings (e.g. monthly) with Python installed: run `clean.py`, then `validate_clean.py`. Only use the outputs if validation passes. Review §2/§2a of the report for new issues, then use `clean_responses.csv` for analysis or the dashboard.

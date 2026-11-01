@@ -27,10 +27,13 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import platform
 import re
+import shutil
 import sys
 import unicodedata
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -81,6 +84,59 @@ def strip_comments(obj):
     if isinstance(obj, dict):
         return {k: strip_comments(v) for k, v in obj.items() if not k.startswith("_")}
     return obj
+
+
+# Unambiguous date formats accepted everywhere. Slash dates (04/05/2026) are ambiguous between
+# month-first and day-first, so they are parsed only with the order set in config (dates.slash_date_order).
+DATE_FORMATS = ["%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M",
+                "%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%b %d %Y", "%d %B %Y", "%d %b %Y"]
+SLASH_FORMATS = {"MDY": ["%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y"],
+                 "DMY": ["%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y"]}
+
+
+def parse_when(v, slash_order):
+    """Parse one date/time value on its own, so the result never depends on other rows.
+    Returns NaT for anything not in a documented format (the caller flags it; nothing is guessed).
+    Timezone offsets are dropped, keeping the clock time as recorded."""
+    if v is None or (not isinstance(v, str) and pd.isna(v)):
+        return pd.NaT
+    if isinstance(v, (datetime, date, pd.Timestamp)):
+        ts = pd.Timestamp(v)
+    else:
+        s = " ".join(str(v).split())
+        if not s:
+            return pd.NaT
+        ts = None
+        for f in DATE_FORMATS + SLASH_FORMATS.get(slash_order or "", []):
+            try:
+                ts = pd.Timestamp(datetime.strptime(s, f))
+                break
+            except ValueError:
+                pass
+        if ts is None and re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$", s):
+            ts = pd.Timestamp(s)                                 # ISO 8601 with a timezone
+        if ts is None:
+            return pd.NaT
+    return ts.tz_localize(None) if ts.tzinfo is not None else ts
+
+
+def validate_config(cfg: dict):
+    """Stop with a clear message if the config can't be applied safely."""
+    errs = []
+    for label, v in cfg["likert_map"].items():
+        if v is not None and not (isinstance(v, int) and 1 <= v <= 5):
+            errs.append(f"likert_map['{label}'] must be a whole number 1-5 or null, got {v!r}")
+    for label, key in cfg["role_map"].items():
+        if key not in cfg["role_display"]:
+            errs.append(f"role_map['{label}'] -> '{key}' has no entry in role_display")
+    for k, v in cfg["thresholds"].items():
+        if not (isinstance(v, (int, float)) and v > 0):
+            errs.append(f"thresholds['{k}'] must be a positive number, got {v!r}")
+    order = cfg.get("dates", {}).get("slash_date_order")
+    if order not in (None, "MDY", "DMY"):
+        errs.append(f"dates.slash_date_order must be 'MDY', 'DMY' or null, got {order!r}")
+    if errs:
+        sys.exit("cleaning_config.json has problems:\n  " + "\n  ".join(errs))
 
 
 def load_local_names(red: dict) -> list:
@@ -184,12 +240,12 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
     unmapped["response_id"] = present("response_id") & ~id_ok
 
     # Timestamps & dates ---------------------------------------------------
-    df["start_time"] = pd.to_datetime(r["start_time"], errors="coerce")
-    df["end_time"] = pd.to_datetime(r["end_time"], errors="coerce")
+    order = cfg.get("dates", {}).get("slash_date_order")
+    for c in ["start_time", "end_time", "training_date"]:
+        df[c] = pd.to_datetime(r[c].map(lambda v: parse_when(v, order)))
     df["duration_sec"] = (df["end_time"] - df["start_time"]).dt.total_seconds()
     df["survey_date"] = df["start_time"].dt.normalize()
     df["survey_month"] = df["start_time"].dt.strftime("%Y-%m")          # blank (not "NaT") if start time is missing
-    df["training_date"] = pd.to_datetime(r["training_date"], errors="coerce")
     df["days_survey_after_training"] = (df["survey_date"] - df["training_date"]).dt.days.astype("Int64")
     for c in ["start_time", "end_time", "training_date"]:           # entered but not a date: blank + flagged, never guessed
         unmapped[c] = present(c) & df[c].isna()
@@ -275,9 +331,11 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
     canon = {int(k): v for k, v in cfg["likert_canonical_labels"].items()}
     df["flag_ambiguous_label"] = False
     meta["ambiguous_cells"] = {}
+    likert_norm = {}
     unscored = "unscored (ambiguous label)"
     for c in LIKERT_COLS:
         n = r[c].map(lambda v: pd.NA if pd.isna(v) or norm(v) == "" else norm(v))   # whitespace-only = missing
+        likert_norm[c] = n
         unmapped[c] = n.notna() & ~n.isin(list(lmap))
         df[c] = n.map(lambda x: pd.NA if pd.isna(x) or lmap.get(x) is None else lmap[x]).astype("Int64")
         amb = n.isin(ambiguous).fillna(False).astype(bool)
@@ -393,21 +451,35 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
     df["pattern_any_decline"] = (df[changes] < 0).any(axis=1).fillna(False)
     df["pattern_no_change"] = complete_k & (df[changes] == 0).all(axis=1).fillna(False)
 
-    # Possible duplicate submissions: identical on every answer, same session, within the time window.
-    answer_cols = ["role_group", "county", "language", "training_date"] + LIKERT_COLS + ["recommend_0_10", "likely_call_0_10"] + TEXT_COLS
-    key = df[answer_cols].astype(str).agg("|".join, axis=1)
+    # Possible duplicate submissions: identical on every answer (normalized source answers, so different role
+    # selections or different ambiguous labels never match), same session, within the time window.
+    def blank_or(v):
+        return None if v is None or (not isinstance(v, (list, tuple)) and pd.isna(v)) else v
+
+    parts = pd.DataFrame({
+        "roles": parsed.map(lambda x: sorted(x[0]) + sorted(norm(u) for u in x[1])),
+        "county": df["county"], "language": df["language"],
+        "training_date": df["training_date"].dt.strftime("%Y-%m-%d"),
+        **{c: likert_norm[c] for c in LIKERT_COLS},
+        **{c: r[c].map(lambda v: None if pd.isna(v) else norm(v)) for c in ["recommend_0_10", "likely_call_0_10"]},
+        **{c: df[c] for c in TEXT_COLS},
+    })
+    key = parts.apply(lambda row: json.dumps([blank_or(v) for v in row.values], default=str), axis=1)   # unambiguous serialization
+    df["duplicate_of_row"] = pd.Series(pd.NA, index=df.index, dtype="Int64")
     df["duplicate_of_id"] = pd.Series(pd.NA, index=df.index, dtype="Int64")
     window = pd.Timedelta(minutes=th["duplicate_window_minutes"])
-    for _, grp in df.assign(_k=key).sort_values("start_time").groupby("_k"):
+    timed = df.assign(_k=key)[df["start_time"].notna()]          # without a start time the window can't be checked
+    for _, grp in timed.sort_values(["start_time", "source_row"]).groupby("_k"):
         if len(grp) < 2:
             continue
         first = grp.iloc[0]
         for idx, row in grp.iloc[1:].iterrows():
             if row["start_time"] - first["start_time"] <= window:
+                df.at[idx, "duplicate_of_row"] = first["source_row"]
                 df.at[idx, "duplicate_of_id"] = first["response_id"]
             else:
                 first = row
-    df["flag_possible_duplicate"] = df["duplicate_of_id"].notna()
+    df["flag_possible_duplicate"] = df["duplicate_of_row"].notna()
 
     um = pd.DataFrame(unmapped).fillna(False).astype(bool)
     df["unmapped_fields"] = um.apply(lambda row: ", ".join(c for c in um.columns if row[c]) or pd.NA, axis=1)
@@ -578,7 +650,7 @@ def group_section(d: pd.DataFrame, by: str, title: str, min_n: int, thin_n: int,
     for g in groups:
         sub = d[labels == g]
         n = len(sub)
-        base = {title: g, "n": n, "Reliability": reliability(n, min_n, thin_n)}
+        base = {title: g, "n": n, "Group size": reliability(n, min_n, thin_n)}
         months = sub["survey_month"].dropna().sort_values()
         timing = {"Sessions": sub["session_id"].nunique(),
                   "Survey months (median)": f"{months.iloc[0]} – {months.iloc[-1]} ({months.iloc[len(months) // 2]})" if len(months) else ""}
@@ -586,12 +658,16 @@ def group_section(d: pd.DataFrame, by: str, title: str, min_n: int, thin_n: int,
         for mid, mlabel, fn in metrics:
             mn, val, disp = values[mid][g]
             st = status[mid][g]
-            shown = disp if st == "shown" else "no data" if st == "no data" else \
-                f"suppressed (n={mn})" if st == "suppressed" else "suppressed (complementary)"
+            cell_rel = "no data" if st == "no data" else "suppressed" if st != "shown" else "thin" if mn < thin_n else "ok"
+            if st == "shown":
+                needs_n = mid.startswith("agree_change_") and mn != n   # other measures already show their n
+                shown = disp + (f" (n={mn})" if needs_n else "") + (" ⚠ thin" if cell_rel == "thin" else "")
+            else:
+                shown = "no data" if st == "no data" else f"suppressed (n={mn})" if st == "suppressed" else "suppressed (complementary)"
             (rk if mid.startswith("agree_change_") else rx)[mlabel] = shown
             records.append({"table": title, "filter": filter_label, "group": g, "members": "; ".join(members[g]),
                             "group_n": n, "metric": mid, "metric_label": mlabel, "metric_n": mn,
-                            "value": val if st == "shown" else None, "display": shown, "status": st})
+                            "value": val if st == "shown" else None, "display": shown, "status": st, "cell_reliability": cell_rel})
         rows_k.append(rk)
         rows_x.append(rx)
     md = (f"**Self-rated change, item by item** ({filter_label})\n\n" + md_table(pd.DataFrame(rows_k)) + "\n\n"
@@ -640,7 +716,12 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
         raw_c = raw[meta["column_map"][c]].map(lambda v: pd.NA if pd.isna(v) else norm(v))
         return df[c].astype("Float64").fillna(raw_c.map(lambda x: amb_scores.get(x) if pd.notna(x) else None).astype("Float64"))
 
-    amb_shift = max((abs((scored_alt(c) >= 4).mean() - (df[c].dropna() >= 4).mean()) * 100 for c in SAT_ITEMS), default=0.0)
+    shifts = []
+    for c in SAT_ITEMS:
+        alt, cur = scored_alt(c).dropna(), df[c].dropna()
+        if len(alt) and len(cur):
+            shifts.append(abs((alt >= 4).mean() - (cur >= 4).mean()) * 100)
+    amb_shift_txt = f"at most {max(shifts):.1f} points" if shifts else "an unknown amount (no scored answers to compare)"
     rtype = {c: df[f"{c}_type"].value_counts() for c in TEXT_COLS}
 
     # ---------------------------------------------------------------- header
@@ -656,7 +737,7 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
     dates = df["start_time"]
     glance = pd.DataFrame([
         ("Responses (rows in = rows out)", f"{len(raw):,} in → {N:,} out"),
-        ("Survey submission dates", f"{dates.min():%b %d, %Y} to {dates.max():%b %d, %Y}"),
+        ("Survey submission dates", f"{dates.min():%b %d, %Y} to {dates.max():%b %d, %Y}" if dates.notna().any() else "unavailable (no readable start times)"),
         ("Training sessions (training date × county)", f"{df['session_id'].nunique()} ({int((df.groupby('session_id').size() < min_n).sum())} with fewer than {min_n} responses)"),
         ("Responses with a review flag (kept; see §5)", f"{int((~df['in_sensitivity_sample']).sum())} ({pct((~df['in_sensitivity_sample']).sum(), N)})"),
         ("Rating cells left unscored (ambiguous label)", f"{amb_total} cells in {amb_rows} responses"),
@@ -677,10 +758,11 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
          f"{N - lc_answered:,} of {N:,} blank ({pct(N - lc_answered, N)}). Coverage clusters **by session** (date × county group): {n_lc_full} have high coverage (≥80% answered), {n_lc_none} low (≤20%), and {n_lc_mixed} in between (§4b). One possible explanation is that different versions of the form were used. That isn't confirmed.",
          f"Left blank, never filled in. Every figure for this question uses its {lc_answered} valid answers as the denominator. Those answers come from {n_lc_any} date × county groups, {lc_in_high} of them from the {n_lc_full} high-coverage groups, so they are **not representative** of all participants."),
         ("2", "Satisfaction items use labels that aren't on the agree/disagree scale",
-         f"{amb_rows} responses use an unresolved label ({amb_names}) ({amb_total} cells: " + ", ".join(f"{c} {n}" for c, n in amb_cells.items() if n) + f"). Sessions: {amb_sessions}. "
+         (f"{amb_rows} responses use an unresolved label ({amb_names}) ({amb_total} cells: " + ", ".join(f"{c} {n}" for c, n in amb_cells.items() if n) + f"). Sessions: {amb_sessions}. "
+          if amb_total else "No responses in this export use an unresolved label. ") +
          "The wording \"Neither agree **or** disagree\" (satisfaction) also differs from \"**nor**\" (knowledge).",
          f"\"Neither agree or disagree\" → neutral (3). Cells with an unresolved label ({amb_names}) are **left unscored** until EveryMind confirms their meaning{resolved_txt}; "
-         f"the respondent's other answers are kept. Scoring them instead as {amb_scores_txt} changes any item's % agree by at most {amb_shift:.1f} points (§6)."),
+         f"the respondent's other answers are kept. Scoring them instead as {amb_scores_txt} changes any item's % agree by {amb_shift_txt} (§6)."),
         ("3", "Satisfaction block not answered",
          f"{sat_none} responses answered none of the 3 satisfaction items and {sat_part} answered only some. {sat_none_in_nosat} of the {sat_none} come from sessions where nobody answered the block ({', '.join(nosat_sessions) or 'none'}). A different form version is one possible explanation.",
          "Left blank. Each item is reported with its own valid n."),
@@ -696,7 +778,7 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
          "Flagged `flag_possible_scale_reversal` for review. **Kept** in primary figures and **not** recoded, because intent can't be confirmed. §6 shows results without them."),
         ("7", "Repeated IDs and possible duplicate submissions",
          f"{int(df['flag_repeated_id'].sum())} rows share a response ID. {int(df['flag_possible_duplicate'].sum())} responses match an earlier response exactly (same session, every answer and comment identical, within {th['duplicate_window_minutes']} min).",
-         "Flagged (`flag_repeated_id`, `flag_possible_duplicate`; `duplicate_of_id` points to the first) for review. **Kept**, because identical answers can come from different people."),
+         "Flagged (`flag_repeated_id`, `flag_possible_duplicate`; `duplicate_of_row` gives the first one's row in the export) for review. **Kept**, because identical answers can come from different people."),
         ("8", "Very short or very long completion times",
          f"{int(df['flag_fast_completion'].sum())} responses took under {th['fast_completion_seconds']} s and {int(df['flag_long_completion'].sum())} took over {th['long_completion_seconds'] // 60} min (median {df['duration_sec'].median():.0f} s). For comparison, {meta['fast_counts'][25]} took under 25 s and {meta['fast_counts'][30]} under 30 s.",
          "Flagged `flag_fast_completion` / `flag_long_completion` for review. **Kept** in primary figures; §6 shows results without them. Thresholds are in config."),
@@ -815,10 +897,10 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
     # ---------------------------------------------------------------- baseline
     w("## 6. Baseline figures\n")
     w("> **Read before using these numbers.** These are **retrospective, self-reported** ratings. The \"before\" ratings were collected *after* the training, "
-      "as recall (\"think back to before…\"), which tends to make change look bigger than it is (response-shift and social-desirability bias). "
+      "as recall (\"think back to before…\"). Recall, response-shift and social-desirability effects can bias the size of the change, and this data can't show in which direction or by how much. "
       "There is no comparison group, no test of knowledge, and no record of actual 988 calls. These figures show that participants *rated themselves* more confident after the training. "
       "They are not objective learning gains, causal effects, hotline use, or mental-health outcomes. Before/after comparisons use only respondents who answered both. "
-      "95% CIs are normal-approximation intervals.\n")
+      "95% CIs are normal-approximation intervals that treat each response as independent. They don't account for responses clustered within sessions, or for who chose to respond, so read them as descriptive, not as program-wide precision.\n")
     w(f"### Self-rated knowledge and confidence, item by item (all valid responses, n = {N:,})\n")
     w(md_table(knowledge_table(df)) + "\n")
     w("The three items are kept separate on purpose. They move by very different amounts, and a combined score would hide that.\n")
@@ -837,10 +919,11 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
                          "Answered by a subset of respondents; the reasons for the missing answers are unconfirmed (§4b). Not representative."})
     w(md_table(pd.DataFrame(rows)) + "\n")
     rc = df["recommend_0_10"].value_counts().sort_index()
-    w("**Recommend score distribution:** " + ", ".join(f"{int(k)}: {v}" for k, v in rc.items()) +
-      f". There is a spike at exactly 5 ({rc.get(5, 0)} responses vs {rc.get(4, 0)} at 4 and {rc.get(6, 0)} at 6). "
-      f"{pct(fives_student, rc.get(5, 0))} of the 5s come from students, who are {pct((df['role_group'] == 'Student').sum(), N)} of respondents. "
-      "One possible reading is that some students used the midpoint as 'no opinion'. The data can't confirm this, so the NPS is reported as is.\n")
+    spike = rc.get(5, 0) > max(rc.get(4, 0), rc.get(6, 0))
+    w("**Recommend score distribution:** " + (", ".join(f"{int(k)}: {v}" for k, v in rc.items()) or "no valid answers") + ". " +
+      (f"There is a spike at exactly 5 ({rc.get(5, 0)} responses vs {rc.get(4, 0)} at 4 and {rc.get(6, 0)} at 6). "
+       f"{pct(fives_student, rc.get(5, 0))} of the 5s come from students, who are {pct((df['role_group'] == 'Student').sum(), N)} of respondents. "
+       "One possible reading is that some students used the midpoint as 'no opinion'. The data can't confirm this, so the NPS is reported as is." if spike else "") + "\n")
 
     w("### Sensitivity check 1: without review-flagged responses\n")
     w(f"Same figures, leaving out the {int((~df['in_sensitivity_sample']).sum())} responses with a review flag (n = {len(sens_df):,}). "
@@ -863,7 +946,8 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
         s, alt = df[c].dropna(), scored_alt(c).dropna()
         arows.append({"Item": lab, "% agree, unscored (primary)": f"{pct((s >= 4).sum(), len(s))} (n={len(s)})",
                       "% agree, scored": f"{pct((alt >= 4).sum(), len(alt))} (n={len(alt)})",
-                      "Mean, unscored": f"{s.astype(float).mean():.3f}", "Mean, scored": f"{alt.astype(float).mean():.3f}"})
+                      "Mean, unscored": f"{s.astype(float).mean():.3f}" if len(s) else "n/a",
+                      "Mean, scored": f"{alt.astype(float).mean():.3f}" if len(alt) else "n/a"})
     w(md_table(pd.DataFrame(arows)) + "\n")
 
     # ---------------------------------------------------------------- groups
@@ -871,7 +955,7 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
     w(f"**Small-group rules (set before analysis):** groups with fewer than {min_n} responses are pooled into an *Other (…)* group. "
       f"If that pool is still under {min_n}, the next-smallest group joins it. Within each measure, any cell with fewer than {min_n} valid answers is suppressed, "
       f"and if suppressed cells together hold fewer than {min_n} answers, the next-smallest cell is also suppressed (*complementary*). That way no hidden result can be worked out by subtraction. "
-      f"Groups of {min_n}–{thin_n - 1} are labeled *thin* and are descriptive only. These are project guardrails, not a guarantee that larger groups are representative.\n")
+      f"Each figure is marked *⚠ thin* when **its own** valid n is {min_n}–{thin_n - 1}, even if the group is larger, so read it as descriptive only. These are project guardrails, not a guarantee that larger groups are representative.\n")
     w("**How to read these tables.** Groups are ordered by size, not by score. This is **not a ranking**. Differences are exploratory and not adjusted for other factors. "
       "Before attributing a gap to training quality, check (a) the *before* % agree, because groups that start high have less room to rise, "
       "(b) the survey months and number of sessions, because question coverage differs across sessions and months (§4b), and (c) composition, e.g. role mix by county (§4). "
@@ -894,10 +978,10 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
     # ---------------------------------------------------------------- limitations
     w("## 8. Limitations and open questions for EveryMind\n")
     for item in [
-        "**Retrospective \"before\" ratings.** Change scores are likely inflated relative to a true pre-test. A real pre-survey would fix this, even for a sample of sessions.",
+        "**Retrospective \"before\" ratings.** Recall and social-desirability effects may bias change scores, in a direction and by an amount this data can't establish. A conventional pre-survey in a sample of sessions would add a comparison point, though it has biases of its own.",
         "**Self-report only.** No measure of tested knowledge, actual 988 use, or mental-health outcomes.",
         f"**\"Likely to call 988\" coverage.** Answered by only {pct(lc_answered, N)} of respondents, across {n_lc_any} date × county groups (mostly the {n_lc_full} high-coverage ones).",
-        f"**Ambiguous labels.** {amb_total} satisfaction cells are unscored until their meaning is confirmed. The sensitivity check shows the effect is small.",
+        f"**Ambiguous labels.** {amb_total} satisfaction cells are unscored until their meaning is confirmed. Scoring them would change any item's % agree by {amb_shift_txt}.",
         "**No session or presenter ID.** Sessions are approximated by training date × county. A self-entered training date can be wrong, and several groups can share a date.",
         "**County and language.** County is the training's affiliation, not residence. Form language isn't necessarily native or training language.",
         "**Unbalanced groups.** Most responses are students in Anne Arundel or Prince George's. Smaller counties and the Spanish form allow only descriptive comparisons.",
@@ -946,7 +1030,7 @@ def data_dictionary(df: pd.DataFrame) -> pd.DataFrame:
         "likely_call_0_10": "Likelihood to call 988 (0-10); mostly blank, see report",
         "sat_items_answered": "Satisfaction items with any answer, incl. ambiguous labels (0-3)", "sat_items_scored": "Satisfaction items with a 1-5 score (0-3)", "satisfaction_mean": "Mean of 3 satisfaction items (only if all 3 scored); used only for the scale-reversal flag",
         "session_id": "Approximate session: training date / county", "session_n": "Responses in this session_id",
-        "duplicate_of_id": "response_id of the earlier identical response, if flagged",
+        "duplicate_of_row": "source_row of the earlier identical response, if flagged", "duplicate_of_id": "response_id of that earlier response (blank if it had none)",
         "source_row": "Row number in the original export (row 1 = headers); identifies a response even if its ID is bad",
         "response_id_original": "ID exactly as exported", "roles_unrecognized": "Role selections no rule covers, as typed",
         "recommend_0_10_original": "Recommend answer exactly as exported", "likely_call_0_10_original": "Likely-to-call answer exactly as exported",
@@ -977,6 +1061,27 @@ def data_dictionary(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------- main
+OUTPUT_FILES = ["clean_responses.csv", "change_log.csv", "group_tables.csv", "data_quality_report.md", "clean_responses.xlsx"]
+
+
+def test_failure_point(stage: str):
+    """Test hook: CLEAN_PY_TEST_FAIL_AT=report|workbook simulates a crash at that stage (used by tests only)."""
+    if os.environ.get("CLEAN_PY_TEST_FAIL_AT") == stage:
+        raise RuntimeError(f"test-induced failure at {stage}")
+
+
+def write_workbook(path: Path, sheets: dict):
+    """Write sheets with every cell as a plain value. A survey answer such as '=1+1' would otherwise
+    become an Excel formula; this pipeline never writes formulas, so every formula cell is forced to text."""
+    with pd.ExcelWriter(path, engine="openpyxl") as w:
+        for name, frame in sheets.items():
+            frame.to_excel(w, sheet_name=name, index=False)
+            for row in w.sheets[name].iter_rows():
+                for cell in row:
+                    if cell.data_type == "f":
+                        cell.data_type = "s"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input", nargs="?", default=str(DEFAULT_INPUT))
@@ -984,43 +1089,72 @@ def main(argv=None):
     ap.add_argument("--out", default=str(HERE / "output"))
     a = ap.parse_args(argv)
 
-    in_path, out = Path(a.input), Path(a.out)
-    out.mkdir(parents=True, exist_ok=True)
-    cfg = strip_comments(json.loads(Path(a.config).read_text()))
-
+    in_path, out, cfg_path = Path(a.input), Path(a.out), Path(a.config)
+    cfg = strip_comments(json.loads(cfg_path.read_text()))
+    validate_config(cfg)
     raw = load_raw(in_path)
-    log = ChangeLog()
-    df, meta = clean(raw, cfg, log)
-    assert len(df) == len(raw), "row count changed"
-    logf = log.frame()
+    if len(raw) == 0:
+        sys.exit(f"{in_path.name} contains no responses. Nothing was written, and {out}/ is unchanged.")
 
-    df.to_csv(out / "clean_responses.csv", index=False)
-    logf.to_csv(out / "change_log.csv", index=False)
-    report, groups = build_report(raw, df, meta, cfg, logf, in_path)
-    (out / "data_quality_report.md").write_text(report)
-    groups.to_csv(out / "group_tables.csv", index=False)
+    # Build the whole bundle in a staging folder next to the output folder. Files are moved into place
+    # only after every step succeeds, so a failed run never leaves new and old files mixed together.
+    out.mkdir(parents=True, exist_ok=True)
+    staging = out.parent / f".{out.name}.staging-{os.getpid()}"
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    try:
+        log = ChangeLog()
+        df, meta = clean(raw, cfg, log)
+        assert len(df) == len(raw), "row count changed"
+        logf = log.frame()
+        df.to_csv(staging / "clean_responses.csv", index=False)
+        logf.to_csv(staging / "change_log.csv", index=False)
 
-    flags = [c for c in df.columns if c.startswith(("flag_", "pattern_"))]
-    flag_summary = pd.DataFrame({"flag": flags, "responses": [int(df[f].sum()) for f in flags]})
-    xl = df.copy()
-    for c in xl.select_dtypes(include=["datetimetz"]).columns:
-        xl[c] = xl[c].dt.tz_localize(None)
-    with pd.ExcelWriter(out / "clean_responses.xlsx") as w:
-        xl.to_excel(w, sheet_name="clean_responses", index=False)
-        data_dictionary(df).to_excel(w, sheet_name="data_dictionary", index=False)
-        logf.to_excel(w, sheet_name="change_log", index=False)
-        flag_summary.to_excel(w, sheet_name="flag_summary", index=False)
-        groups.to_excel(w, sheet_name="group_tables", index=False)
-        raw.to_excel(w, sheet_name="raw_original", index=False)
+        test_failure_point("report")
+        report, groups = build_report(raw, df, meta, cfg, logf, in_path)
+        (staging / "data_quality_report.md").write_text(report)
+        groups.to_csv(staging / "group_tables.csv", index=False)
+
+        test_failure_point("workbook")
+        flags = [c for c in df.columns if c.startswith(("flag_", "pattern_"))]
+        xl = df.copy()
+        for c in xl.select_dtypes(include=["datetimetz"]).columns:
+            xl[c] = xl[c].dt.tz_localize(None)
+        write_workbook(staging / "clean_responses.xlsx", {
+            "clean_responses": xl, "data_dictionary": data_dictionary(df), "change_log": logf,
+            "flag_summary": pd.DataFrame({"flag": flags, "responses": [int(df[f].sum()) for f in flags]}),
+            "group_tables": groups, "raw_original": raw})
+
+        manifest = {
+            "run_id": datetime.now().strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}",
+            "rows": len(df),
+            "input": {"name": in_path.name, "sha256": sha256(in_path)},
+            "config": {"name": cfg_path.name, "sha256": sha256(cfg_path)},
+            "code": {"clean.py": sha256(Path(__file__))},
+            "versions": {"python": platform.python_version(), "pandas": pd.__version__,
+                         "openpyxl": __import__("openpyxl").__version__},
+            "files": {f: sha256(staging / f) for f in OUTPUT_FILES},
+        }
+        (staging / "run_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+        # Publish: data files first, manifest last. validate_clean.py checks every file against the manifest,
+        # so an interrupted publish is detectable rather than silently mixed.
+        for f in OUTPUT_FILES + ["run_manifest.json"]:
+            os.replace(staging / f, out / f)
+    except BaseException:
+        print(f"Run failed; nothing was published, and {out}/ still holds the previous successful run (if any).", file=sys.stderr)
+        raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
     if meta["unmapped"]:
         print(f"WARNING: {int(df['flag_unmapped_value'].sum())} responses contain values no rule in cleaning_config.json covers "
               "(left blank, flagged flag_unmapped_value):")
         for u in meta["unmapped"]:
             print(f"    {u['column']}: {u['raw_value']} x{u['rows']}")
-    print(f"Cleaned {len(df):,} responses -> {out}/")
+    print(f"Cleaned {len(df):,} responses -> {out}/  (run {manifest['run_id']})")
     print(f"  responses with a review flag (kept): {int((~df['in_sensitivity_sample']).sum())}  |  ambiguous rating cells unscored: {sum(meta['ambiguous_cells'].values())}")
-    for f in ["clean_responses.csv", "clean_responses.xlsx", "change_log.csv", "group_tables.csv", "data_quality_report.md"]:
+    for f in OUTPUT_FILES + ["run_manifest.json"]:
         print(f"  {out / f}")
 
 

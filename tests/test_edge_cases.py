@@ -88,8 +88,32 @@ def read_clean(out):
     return pd.read_csv(out / "clean_responses.csv", low_memory=False, keep_default_na=False, na_values=[""])
 
 
-def run(args):
-    return subprocess.run([sys.executable, str(ROOT / "clean.py"), *args], capture_output=True, text=True)
+def run(args, env=None):
+    import os
+    return subprocess.run([sys.executable, str(ROOT / "clean.py"), *args], capture_output=True, text=True,
+                          env={**os.environ, **(env or {})})
+
+
+def validate(raw_path, out, cfg):
+    v = subprocess.run([sys.executable, str(ROOT / "validate_clean.py"), str(raw_path), "--out", str(out), "--config", str(cfg)],
+                       capture_output=True, text=True)
+    fails = [l for l in v.stdout.splitlines() if l.startswith("FAIL")]
+    return v.returncode, fails, v.stderr
+
+
+def report_text(out):
+    f = Path(out) / "data_quality_report.md"
+    return f.read_text() if f.exists() else ""
+
+
+def bundle_hashes(out):
+    import hashlib
+    return {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(Path(out).glob("*")) if f.is_file()}
+
+
+def write_xlsx(rows, path):
+    pd.DataFrame(rows, columns=HEADERS).to_excel(path, index=False)
+    return path
 
 
 def main():
@@ -216,6 +240,153 @@ def main():
                                  "--config", str(tmp / "cfg.json")], capture_output=True, text=True)
             check("validator passes with missing and repeated IDs", v4.returncode == 0,
                   "; ".join(l for l in v4.stdout.splitlines() if l.startswith("FAIL"))[:400] or v4.stderr[-300:])
+
+        cfgp = tmp / "cfg.json"
+        base = [row(i) for i in range(1, 41)]
+
+        # --- Review 3, finding 1: a batch whose satisfaction block is entirely blank
+        sat_blank = [dict(r, **{H["sat_engaged"]: None, H["sat_knowledge"]: None, H["sat_organized"]: None}) for r in base]
+        x = write_xlsx(sat_blank, tmp / "satblank.xlsx")
+        p = run([str(x), "--config", str(cfgp), "--out", str(tmp / "o_satblank")])
+        code, fails, err = validate(x, tmp / "o_satblank", cfgp) if p.returncode == 0 else (1, [], p.stderr)
+        rep = (tmp / "o_satblank" / "data_quality_report.md").read_text() if p.returncode == 0 else ""
+        check("blank satisfaction block: runs, validates, shows n/a (not nan, not 'small effect')",
+              p.returncode == 0 and code == 0 and "| Presenter engaged participants: % agree (4-5) | n/a | 0 |" in rep
+              and not re.search(r"\bnan\b", rep, re.I), (p.stderr[-200:] or "; ".join(fails))[:300])
+        one_blank = [dict(r, **{H["sat_organized"]: None}) for r in base]
+        x = write_xlsx(one_blank, tmp / "satone.xlsx")
+        p = run([str(x), "--config", str(cfgp), "--out", str(tmp / "o_satone")])
+        check("one satisfaction item entirely blank: runs and validates", p.returncode == 0 and validate(x, tmp / "o_satone", cfgp)[0] == 0)
+
+        # --- extra notes: empty export, all timestamps missing, no spike text without a spike
+        x = write_xlsx([], tmp / "empty.xlsx")
+        before = bundle_hashes(tmp / "o_satone")
+        p = run([str(x), "--config", str(cfgp), "--out", str(tmp / "o_satone")])
+        check("empty export: clear message, nonzero exit, previous outputs untouched",
+              p.returncode != 0 and "no responses" in p.stderr.lower() and "Traceback" not in p.stderr and bundle_hashes(tmp / "o_satone") == before)
+        no_time = [dict(r, **{H["start"]: None, H["end"]: None}) for r in base]
+        x = write_xlsx(no_time, tmp / "notime.xlsx")
+        p = run([str(x), "--config", str(cfgp), "--out", str(tmp / "o_notime")])
+        check("all timestamps missing: runs and validates", p.returncode == 0 and validate(x, tmp / "o_notime", cfgp)[0] == 0, p.stderr[-200:])
+        rep = report_text(tmp / "o_satone")
+        check("no 'spike at 5' claim when there are no 5s", bool(rep) and "spike" not in rep)
+
+        # --- finding 2: a failed refresh must not mix old and new files
+        good = write_xlsx(base, tmp / "good.xlsx")
+        run([str(good), "--config", str(cfgp), "--out", str(tmp / "o_pub")])
+        before = bundle_hashes(tmp / "o_pub")
+        other = write_xlsx([dict(r, **{H["recommend"]: 3}) for r in base], tmp / "other.xlsx")
+        for stage in ["report", "workbook"]:
+            p = run([str(other), "--config", str(cfgp), "--out", str(tmp / "o_pub")], env={"CLEAN_PY_TEST_FAIL_AT": stage})
+            check(f"failure at {stage} stage: nothing published, previous bundle unchanged",
+                  p.returncode != 0 and bundle_hashes(tmp / "o_pub") == before and not list(tmp.glob(".o_pub.staging-*")))
+        check("previous bundle still validates after failed refreshes", validate(good, tmp / "o_pub", cfgp)[0] == 0)
+
+        # --- finding 3: the validator must reject broken bundles, each with a specific failure
+        def mutated(name, fn, expect):
+            d = tmp / f"mut_{name}"
+            shutil.copytree(tmp / "o_pub", d)
+            fn(d)
+            code, fails, err = validate(good, d, cfgp)
+            check(f"validator rejects: {name}", code != 0 and any(expect in f for f in fails), "; ".join(fails)[:300] or err[-200:])
+
+        def edit_groups(d, f):
+            g = pd.read_csv(d / "group_tables.csv", keep_default_na=False, na_values=[""])
+            f(g)
+            g.to_csv(d / "group_tables.csv", index=False)
+
+        mutated("blanked shown values", lambda d: edit_groups(d, lambda g: g.__setitem__("value", g["value"].where(g["status"] != "shown"))),
+                "every shown value is a number")
+        mutated("denominators set to 9999", lambda d: edit_groups(d, lambda g: g.__setitem__("metric_n", g["metric_n"].where(g["status"] != "shown", 9999))),
+                "every denominator recomputed")
+        mutated("Role table deleted", lambda d: (lambda g: g[g["table"] != "Role"].to_csv(d / "group_tables.csv", index=False))(
+            pd.read_csv(d / "group_tables.csv", keep_default_na=False, na_values=[""])), "exactly the expected tables")
+        mutated("workbook replaced with junk", lambda d: (d / "clean_responses.xlsx").write_bytes(b"not an Excel workbook"), "workbook: readable")
+        mutated("report from another run", lambda d: (d / "data_quality_report.md").write_text("stale"), "matches the run manifest")
+
+        # --- finding 4: survey text that looks like a formula stays literal text
+        import openpyxl
+        f_rows = [dict(r) for r in base]
+        f_rows[0][H["improve"]] = "=1+1"
+        f_rows[1][H["valuable"]] = '=HYPERLINK("http://example.com","click")'
+        csvp = tmp / "formula.csv"
+        pd.DataFrame(f_rows, columns=HEADERS).to_csv(csvp, index=False)
+        p = run([str(csvp), "--config", str(cfgp), "--out", str(tmp / "o_formula")])
+        if p.returncode == 0:
+            wb = openpyxl.load_workbook(tmp / "o_formula" / "clean_responses.xlsx")
+            cells = [c for ws in wb for row in ws.iter_rows() for c in row if isinstance(c.value, str) and c.value.startswith("=")]
+            check("formula-looking text is stored as literal text in every sheet",
+                  len(cells) >= 8 and all(c.data_type == "s" for c in cells) and any(c.value == "=1+1" for c in cells))
+            check("formula-looking text: validator passes", validate(csvp, tmp / "o_formula", cfgp)[0] == 0)
+        else:
+            check("formula-looking text run", False, p.stderr[-200:])
+
+        # --- finding 5: duplicates compare real answers, not simplified categories
+        t0 = "2026-05-01 10:00:00"
+        # each pair is identical except for the field under test (same comments, session and start time)
+        pairs = [row(1, start=t0, valuable="x", role="Student;Caregiver/parent"), row(2, start=t0, valuable="x", role="School staff member;Caregiver/parent"),
+                 row(3, start=t0, valuable="x", sat_engaged="Very agree"), row(4, start=t0, valuable="x", sat_engaged="Satisfied"),
+                 row(5, start=t0, valuable="a|b", improve="c"), row(6, start=t0, valuable="a", improve="b|c"),
+                 row(7, id=None, start=t0, valuable="same", improve="same"), row(8, start="2026-05-01 10:05:00", valuable="same", improve="same")]
+        pairs += [row(i) for i in range(20, 50)]
+        x = write_xlsx(pairs, tmp / "dups.xlsx")
+        p = run([str(x), "--config", str(cfgp), "--out", str(tmp / "o_dups")])
+        if p.returncode == 0:
+            dd = read_clean(tmp / "o_dups")
+            fl = dd["flag_possible_duplicate"].astype(str).eq("True")
+            check("different role selections / ambiguous labels / '|' in comments are not duplicates", not fl[:6].any(), str(fl[:6].tolist()))
+            check("identical pair whose first response has no ID is flagged, linked by source_row",
+                  bool(fl[7]) and int(dd.loc[7, "duplicate_of_row"]) == int(dd.loc[6, "source_row"]))
+            check("duplicate test export validates", validate(x, tmp / "o_dups", cfgp)[0] == 0, "; ".join(validate(x, tmp / "o_dups", cfgp)[1])[:300])
+
+        # --- finding 6: supported config changes validate; tampering still fails
+        cfg6 = json.loads(cfgp.read_text())
+        cfg6["thresholds"]["fast_completion_seconds"] = 60
+        cfg6["role_map"]["pupil"] = "student"
+        cfg6["likert_map"]["somewhat agree"] = 4
+        cfg6p = tmp / "cfg6.json"
+        cfg6p.write_text(json.dumps(cfg6))
+        r6 = [row(1, role="Pupil"), row(2, post_describe="Somewhat agree"), row(3, lang="Espanol"), row(4, role="Student;Student"),
+              row(5, role="Former student")] + [row(i) for i in range(6, 40)]
+        x = write_xlsx(r6, tmp / "cfg6.xlsx")
+        p = run([str(x), "--config", str(cfg6p), "--out", str(tmp / "o_cfg6")])
+        code, fails, err = validate(x, tmp / "o_cfg6", cfg6p) if p.returncode == 0 else (1, [], p.stderr)
+        check("config changes (fast=60s, 'pupil' role, 'somewhat agree'=4) and espanol / Student;Student / 'Former student' validate",
+              code == 0, ("; ".join(fails) or err)[:400])
+        if p.returncode == 0:
+            d6 = read_clean(tmp / "o_cfg6").set_index("response_id")
+            check("config changes applied: pupil=student, somewhat agree=4 (default 5), espanol=Spanish, Student;Student=Student, 'Former student' unrecognized",
+                  d6.loc[1, "role_group"] == "Student" and d6.loc[2, "post_describe"] == 4 and d6.loc[3, "language"] == "Spanish"
+                  and d6.loc[4, "role_group"] == "Student" and d6.loc[5, "role_group"] == "Includes unrecognized role")
+        bad_cfg = json.loads(cfgp.read_text())
+        bad_cfg["likert_map"]["agree"] = 7
+        (tmp / "badcfg.json").write_text(json.dumps(bad_cfg))
+        p = run([str(good), "--config", str(tmp / "badcfg.json"), "--out", str(tmp / "o_badcfg")])
+        check("invalid config (rating 7) is rejected with a clear message", p.returncode != 0 and "likert_map" in p.stderr and "Traceback" not in p.stderr)
+
+        # --- finding 7: mixed date formats, independent of row order
+        dates = [row(1, tdate="2026-04-28"), row(2, tdate="April 28, 2026"), row(3, tdate="04/28/2026"), row(4, tdate="28 April 2026"),
+                 row(5, start="2026-05-01T10:00:00Z", end="2026-05-01T10:01:00Z")] + [row(i) for i in range(6, 40)]
+        for name, rows_ in [("in order", dates), ("reversed", dates[::-1])]:
+            x = write_xlsx(rows_, tmp / f"dates_{name}.xlsx")
+            p = run([str(x), "--config", str(cfgp), "--out", str(tmp / f"o_dates_{name}")])
+            dd = read_clean(tmp / f"o_dates_{name}") if p.returncode == 0 else None
+            ok = dd is not None and (dd.set_index("response_id").loc[[1, 2, 3, 4], "training_date"].astype(str).str[:10] == "2026-04-28").all()
+            check(f"mixed date formats all read as 2026-04-28 ({name})", ok)
+        check("mixed-date export validates", validate(tmp / "dates_in order.xlsx", tmp / "o_dates_in order", cfgp)[0] == 0,
+              "; ".join(validate(tmp / "dates_in order.xlsx", tmp / "o_dates_in order", cfgp)[1])[:300])
+
+        # --- finding 8: thin label follows each figure's own n
+        thin = [row(i, role="Other (e.g., community member)", likely_call=(9 if i <= 15 else None)) for i in range(1, 36)] + \
+               [row(i) for i in range(36, 80)]
+        x = write_xlsx(thin, tmp / "thin.xlsx")
+        p = run([str(x), "--config", str(cfgp), "--out", str(tmp / "o_thin")])
+        if p.returncode == 0:
+            g = pd.read_csv(tmp / "o_thin" / "group_tables.csv", keep_default_na=False, na_values=[""])
+            c = g[(g["table"] == "Role") & (g["group"] == "Other/community member") & (g["metric"] == "likely_call_9_10")].iloc[0]
+            c2 = g[(g["table"] == "Role") & (g["group"] == "Other/community member") & (g["metric"] == "recommend_nps")].iloc[0]
+            check("figure with own n 10-29 in a 35-person group is labeled thin; well-answered figure is not",
+                  c["metric_n"] == 15 and c.get("cell_reliability") == "thin" and "⚠ thin" in str(c["display"]) and c2.get("cell_reliability") == "ok")
 
         # Independent validator also passes on the synthetic export
         v = subprocess.run([sys.executable, str(ROOT / "validate_clean.py"), str(xlsx), "--out", str(tmp / "out"), "--config", str(tmp / "cfg.json")],
