@@ -1,0 +1,112 @@
+{
+  "_about": "Editable rules for clean.py. Staff can update labels, aliases and thresholds here without touching code. Keys starting with '_' are comments.",
+
+  "columns": {
+    "_about": "Each cleaned column is found by header text. 'all' = every substring must appear in the lower-cased header (non-breaking spaces removed). 'exact' = header must equal this.",
+    "response_id":    {"exact": "id"},
+    "start_time":     {"all": ["start time"]},
+    "end_time":       {"all": ["completion time"]},
+    "language_raw":   {"all": ["language"]},
+    "role_raw":       {"all": ["are you a"]},
+    "training_date":  {"all": ["date of your training"]},
+    "county_raw":     {"all": ["which county"]},
+    "post_identify":  {"all": ["agree with the statements", "identify mental health"]},
+    "post_describe":  {"all": ["agree with the statements", "describe 988"]},
+    "post_when":      {"all": ["agree with the statements", "know when to use 988"]},
+    "pre_identify":   {"all": ["think back to before", "identify"]},
+    "pre_describe":   {"all": ["think back to before", "describe 988"]},
+    "pre_when":       {"all": ["think back to before", "knew when to use 988"]},
+    "sat_engaged":    {"all": ["aspects of the training", "engaged the participants"]},
+    "sat_knowledge":  {"all": ["aspects of the training", "knew the subject matter"]},
+    "sat_organized":  {"all": ["aspects of the training", "well organized"]},
+    "recommend_0_10": {"all": ["likely are you to recommend"]},
+    "likely_call_0_10": {"all": ["likely are you to call 988"]},
+    "text_most_valuable": {"all": ["most valuable"]},
+    "text_improve":   {"all": ["improve this training"]}
+  },
+
+  "likert_map": {
+    "_about": "Keys are lower-cased, whitespace-normalized labels. Values are 1-5 scores.",
+    "strongly disagree": 1,
+    "disagree": 2,
+    "neither agree nor disagree": 3,
+    "neither agree or disagree": 3,
+    "agree": 4,
+    "strongly agree": 5,
+    "very agree": null,
+    "satisfied": null
+  },
+  "likert_ambiguous_labels": {
+    "_about": "Labels that are not on the agree/disagree scale and whose meaning is unconfirmed. Mapped to null in likert_map, so the cell is left unscored (the respondent's other answers are kept). The report counts excluded cells and shows a sensitivity check scoring them as below. If EveryMind confirms a meaning, put the score in likert_map.",
+    "labels": ["very agree", "satisfied"],
+    "sensitivity_scores": {"very agree": 5, "satisfied": 4}
+  },
+  "likert_canonical_labels": {"1": "Strongly disagree", "2": "Disagree", "3": "Neither agree nor disagree", "4": "Agree", "5": "Strongly agree"},
+
+  "language_map": {
+    "_about": "Matched on the start of the lower-cased label.",
+    "english": "English",
+    "español": "Spanish",
+    "espanol": "Spanish"
+  },
+
+  "role_map": {
+    "_about": "Role is multi-select (semicolon separated). Each label becomes an is_* column.",
+    "student": "student",
+    "school staff member": "school_staff",
+    "caregiver/parent": "caregiver_parent",
+    "other (e.g., community member)": "other_community"
+  },
+  "role_display": {
+    "student": "Student",
+    "school_staff": "School staff",
+    "caregiver_parent": "Caregiver/parent",
+    "other_community": "Other/community member"
+  },
+
+  "county_aliases": {
+    "_about": "Keys are lower-cased county text with the word 'county' and extra spaces removed. Anything not listed is kept as typed (title-cased) and flagged as unrecognized.",
+    "anne arundel": "Anne Arundel",
+    "prince george's": "Prince George's",
+    "montgomery": "Montgomery",
+    "montgomery with nami mc": "Montgomery",
+    "queen anne's": "Queen Anne's",
+    "fairfax": "Fairfax",
+    "harris": "Harris"
+  },
+  "maryland_counties": ["Anne Arundel", "Prince George's", "Montgomery", "Queen Anne's"],
+  "county_notes": {
+    "Fairfax": "Fairfax County is in Virginia, outside the Maryland counties in this dataset.",
+    "Harris": "Not a Maryland county; the state cannot be determined from the data."
+  },
+
+  "thresholds": {
+    "fast_completion_seconds": 20,
+    "_fast_rationale": "The form has 13 required closed-ended items; under 20 seconds is under ~1.5 s per item (roughly the fastest 1% of responses). Counts at 25 s and 30 s are also reported so the choice can be checked.",
+    "long_completion_seconds": 3600,
+    "_long_rationale": "Over an hour for a ~2-minute form usually means the tab was left open. Flagged for review only.",
+    "late_survey_days": 30,
+    "small_group_min_n": 10,
+    "thin_group_n": 30,
+    "_group_rationale": "Groups under small_group_min_n are suppressed (privacy and stability); groups under thin_group_n are shown but labeled directional only.",
+    "duplicate_window_minutes": 60
+  },
+
+  "comment_response_types": {
+    "_about": "A comment that exactly matches one of these phrases (after lower-casing and removing punctuation and apostrophes) gets that response type; anything else is 'substantive'. Blank cells are 'blank'. Wording is never changed. Praise, suggestions and questions are themes for the analysis stage, not cleaning.",
+    "nothing": ["nothing", "none", "no", "n a", "na", "nope", "nada", "nothing else", "nothing really", "none really",
+                "no suggestions", "no improvements", "nothing to improve", "no comment", "no comments"],
+    "dont_know": ["idk", "i dont know", "dont know", "not sure", "i dont know honestly", "i dont really know", "no idea"],
+    "no_questions": ["no questions", "i have no questions", "i dont have any questions", "no questions at this time", "i have no question", "no question"]
+  },
+
+  "redaction": {
+    "_about": "Applied only to the *_redacted text columns. Original text stays in the main text columns for internal use; share only the redacted columns.",
+    "names": [],
+    "names_file": "redaction_names.local.json",
+    "_names_source": "Names of real people found by manually reviewing comments are kept in names_file, which is gitignored so they never reach a shared repo. Copy redaction_names.example.json to that filename and add names there. Names listed in 'names' here are also used.",
+    "honorific_pattern": "\\b(Mr|Mrs|Ms|Miss|Dr)\\.?\\s+[A-Z][a-zA-Z'-]+",
+    "public_phone_allowlist": ["4107685522"],
+    "_allowlist_note": "410-768-5522 appears in several comments as a crisis line taught in the training. Confirm with EveryMind. Any other phone number is redacted."
+  }
+}

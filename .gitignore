@@ -1,0 +1,13 @@
+# Partner data and case materials: never commit (survey comments contain personal information)
+*.xlsx
+*.xls
+*.csv
+*.pdf
+output/
+tmp/
+redaction_names.local.json
+
+# Python / OS
+__pycache__/
+*.pyc
+.DS_Store

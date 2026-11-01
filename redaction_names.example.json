@@ -1,0 +1,7 @@
+{
+  "_about": "Copy to redaction_names.local.json (gitignored) and list names of real people that appear in comments.",
+  "names": [
+    "Firstname Lastname",
+    "Lastname"
+  ]
+}
