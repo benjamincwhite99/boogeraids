@@ -65,7 +65,7 @@
   },
 
   "county_aliases": {
-    "_about": "Keys are lower-cased county text with the word 'county' and extra spaces removed. Anything not listed is kept as typed (title-cased) and flagged as unrecognized.",
+    "_about": "Keys are lower-cased county text with the word 'county' and extra spaces removed. Anything not listed is kept as typed with an 'UNRECOGNIZED:' prefix and flagged (flag_unmapped_value), never forced into a listed county.",
     "anne arundel": "Anne Arundel",
     "prince george's": "Prince George's",
     "montgomery": "Montgomery",
@@ -75,20 +75,20 @@
     "harris": "Harris"
   },
   "maryland_counties": ["Anne Arundel", "Prince George's", "Montgomery", "Queen Anne's"],
-  "county_notes": {
+  "_county_notes": {
     "Fairfax": "Fairfax County is in Virginia, outside the Maryland counties in this dataset.",
     "Harris": "Not a Maryland county; the state cannot be determined from the data."
   },
 
   "thresholds": {
     "fast_completion_seconds": 20,
-    "_fast_rationale": "The form has 13 required closed-ended items; under 20 seconds is under ~1.5 s per item (roughly the fastest 1% of responses). Counts at 25 s and 30 s are also reported so the choice can be checked.",
+    "_fast_rationale": "The form has 13 closed-ended items; under 20 seconds is under ~1.5 s per item (roughly the fastest 1% of responses). Counts at 25 s and 30 s are also reported so the choice can be checked.",
     "long_completion_seconds": 3600,
-    "_long_rationale": "Over an hour for a ~2-minute form usually means the tab was left open. Flagged for review only.",
+    "_long_rationale": "Most people finish in under 2 minutes (median 47 s), so over an hour usually means the tab was left open. Flagged for review only, never excluded.",
     "late_survey_days": 30,
     "small_group_min_n": 10,
     "thin_group_n": 30,
-    "_group_rationale": "Groups under small_group_min_n are suppressed (privacy and stability); groups under thin_group_n are shown but labeled directional only.",
+    "_group_rationale": "Groups under small_group_min_n are pooled into an Other (...) group; cells under it are suppressed, with complementary suppression so nothing can be recovered by subtraction. Groups under thin_group_n are shown but labeled descriptive only.",
     "duplicate_window_minutes": 60
   },
 
@@ -101,7 +101,7 @@
   },
 
   "redaction": {
-    "_about": "Applied only to the *_redacted text columns. Original text stays in the main text columns for internal use; share only the redacted columns.",
+    "_about": "Applied only to the *_redacted text columns. Original text stays in the main text columns for internal use. Automated redaction is preliminary (it only finds listed names, Mr./Ms./Dr. + name, emails and phone numbers), so review every excerpt manually before quoting or sharing it.",
     "names": [],
     "names_file": "redaction_names.local.json",
     "_names_source": "Names of real people found by manually reviewing comments are kept in names_file, which is gitignored so they never reach a shared repo. Copy redaction_names.example.json to that filename and add names there. Names listed in 'names' here are also used.",

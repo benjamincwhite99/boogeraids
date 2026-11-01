@@ -11,11 +11,14 @@ Outputs (in --out, default ./output)
     clean_responses.csv        one row per survey response, cleaned + flag_* columns
     clean_responses.xlsx       same data plus data dictionary, change log, flag summary and the untouched raw export
     change_log.csv             every raw value -> cleaned value mapping, with counts and the rule applied
+    group_tables.csv           every group comparison in the report, long format, with suppression status
     data_quality_report.md     what was found, what was changed, and baseline figures with sample sizes
 
 Principles
-    * No rows are dropped and no values are imputed. Row count in == row count out.
-    * Judgment calls (speeders, possible duplicates, suspected scale reversal) are flags, not deletions.
+    * The source file is never modified. No rows are dropped and no values are imputed. Row count in == row count out.
+    * Judgment calls (speeders, possible duplicates, suspected scale reversal) are flags, never exclusions.
+    * Values no rule covers (unknown labels, unreadable dates, decimal ratings, ...) are left blank and flagged.
+    * Ambiguous rating labels stay unscored until a score is confirmed in the config.
     * Every mapping lives in cleaning_config.json so new exports can be processed without code edits.
 """
 from __future__ import annotations
@@ -133,9 +136,11 @@ class ChangeLog:
 
 # --------------------------------------------------------------------------- loading
 def load_raw(path: Path) -> pd.DataFrame:
+    """Only truly empty cells become missing. pandas' default would also turn literal answers such as
+    'None', 'NA' or 'null' into blanks, and those are real comments."""
     if path.suffix.lower() == ".csv":
         return pd.read_csv(path, dtype=object, keep_default_na=False, na_values=[""])
-    return pd.read_excel(path, dtype=object)
+    return pd.read_excel(path, dtype=object, keep_default_na=False, na_values=[""])
 
 
 def map_columns(raw: pd.DataFrame, spec: dict) -> tuple[dict, list]:
@@ -167,25 +172,27 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
     th = cfg["thresholds"]
 
     # IDs ------------------------------------------------------------------
+    def present(col):
+        """True where the raw cell has something in it (not blank or whitespace-only)."""
+        return r[col].map(lambda v: pd.notna(v) and str(v).strip() != "")
+
     df["response_id"] = pd.to_numeric(r["response_id"], errors="coerce").astype("Int64")
+    unmapped["response_id"] = present("response_id") & df["response_id"].isna()
 
     # Timestamps & dates ---------------------------------------------------
     df["start_time"] = pd.to_datetime(r["start_time"], errors="coerce")
     df["end_time"] = pd.to_datetime(r["end_time"], errors="coerce")
     df["duration_sec"] = (df["end_time"] - df["start_time"]).dt.total_seconds()
     df["survey_date"] = df["start_time"].dt.normalize()
-    df["survey_month"] = df["start_time"].dt.to_period("M").astype(str)
+    df["survey_month"] = df["start_time"].dt.strftime("%Y-%m")          # blank (not "NaT") if start time is missing
     df["training_date"] = pd.to_datetime(r["training_date"], errors="coerce")
     df["days_survey_after_training"] = (df["survey_date"] - df["training_date"]).dt.days.astype("Int64")
-    meta["unparseable"] = {
-        "start_time": int((df["start_time"].isna() & r["start_time"].notna()).sum()),
-        "end_time": int((df["end_time"].isna() & r["end_time"].notna()).sum()),
-        "training_date": int((df["training_date"].isna() & r["training_date"].notna()).sum()),
-    }
+    for c in ["start_time", "end_time", "training_date"]:           # entered but not a date: blank + flagged, never guessed
+        unmapped[c] = present(c) & df[c].isna()
 
     # Language -------------------------------------------------------------
     def lang(v):
-        if pd.isna(v):
+        if pd.isna(v) or norm(v) == "":
             return pd.NA
         n = norm(v)
         for prefix, label in cfg["language_map"].items():
@@ -228,8 +235,10 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
     def county(v):
         if pd.isna(v):
             return pd.NA
-        k = re.sub(r"\bcounty\b", " ", norm(v))
+        k = re.sub(r"\bcounty\b", " ", norm(v).replace("’", "'").replace("‘", "'"))   # curly apostrophes, e.g. Prince George’s
         k = re.sub(r"\s+", " ", k).strip()
+        if not norm(v):
+            return pd.NA                                              # whitespace-only = missing
         return aliases.get(k, "UNRECOGNIZED:" + str(v).strip())
 
     df["county"] = r["county_raw"].map(county)
@@ -241,7 +250,11 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
 
     # Likert items ---------------------------------------------------------
     lmap = {k: v for k, v in cfg["likert_map"].items()}
-    ambiguous = set(cfg["likert_ambiguous_labels"]["labels"])
+    # A listed label counts as ambiguous only while it is unresolved (null in likert_map). Once EveryMind
+    # confirms a meaning and a score is entered, it is scored, logged and reported like any other label.
+    ambiguous = {l for l in cfg["likert_ambiguous_labels"]["labels"] if lmap.get(l) is None}
+    meta["ambiguous_labels"] = sorted(ambiguous)
+    meta["resolved_labels"] = sorted(set(cfg["likert_ambiguous_labels"]["labels"]) - ambiguous)
     canon = {int(k): v for k, v in cfg["likert_canonical_labels"].items()}
     df["flag_ambiguous_label"] = False
     meta["ambiguous_cells"] = {}
@@ -260,11 +273,13 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
 
     # 0-10 scales ----------------------------------------------------------
     for c in ["recommend_0_10", "likely_call_0_10"]:
-        num = pd.to_numeric(r[c], errors="coerce")
-        out_of_range = num.notna() & ~num.between(0, 10)
-        unmapped[c] = out_of_range | (num.isna() & r[c].notna())
-        df[c] = num.where(~out_of_range).astype("Int64")
-        log.add_pairs(c, r[c], df[c], "numeric 0-10; out-of-range -> blank",
+        has_value = present(c)
+        num = pd.to_numeric(r[c].where(has_value), errors="coerce")
+        valid = num.notna() & num.between(0, 10) & (num % 1 == 0)          # whole numbers 0-10 only
+        unmapped[c] = has_value & ~valid                                   # non-numeric, decimal or out of range
+        df[f"{c}_original"] = r[c]
+        df[c] = num.where(valid).round().astype("Int64")
+        log.add_pairs(c, r[c], df[c], "whole number 0-10; anything else -> blank and flagged (flag_unmapped_value)",
                       same=lambda raw_v, v: float(raw_v) == float(v), display=lambda v: str(int(v)))
     rec = df["recommend_0_10"]
     df["recommend_category"] = pd.Series(pd.NA, index=df.index, dtype="object")
@@ -317,7 +332,7 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
             return s
         out = honor.sub("[NAME]", s)
         for nm in names:
-            out = re.sub(rf"\b{re.escape(nm)}\b", "[NAME]", out)
+            out = re.sub(rf"\b{re.escape(nm)}\b", "[NAME]", out, flags=re.IGNORECASE)
         out = email.sub("[EMAIL]", out)
         out = phone.sub(lambda m: m.group(0) if re.sub(r"\D", "", m.group(0)) in allow else "[PHONE]", out)
         return out
@@ -337,7 +352,7 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
     df["session_n"] = df.groupby("session_id")["response_id"].transform("size")
 
     # Which optional blocks did this response contain? Missingness turns out to be session-level
-    # (form versions), so this is reported per session in the data-quality report.
+    # (possibly form versions), so coverage is reported per session in the data-quality report.
     has_sat = df["sat_items_answered"] > 0
     has_lc = df["likely_call_0_10"].notna()
     df["answered_blocks"] = (has_sat.map({True: "satisfaction", False: ""}) + has_lc.map({True: "+likely_call", False: ""})).str.strip("+").replace("", "neither")
@@ -345,13 +360,13 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
     df["session_satisfaction_coverage"] = has_sat.groupby(df["session_id"]).transform("mean").round(3)
 
     # Quality / pattern flags ----------------------------------------------
-    df["flag_training_date_missing"] = df["training_date"].isna()
+    df["flag_training_date_missing"] = ~present("training_date")      # truly blank; unreadable dates are flag_unmapped_value
     d = df["days_survey_after_training"]
     df["flag_survey_before_training"] = d.notna() & (d < 0)
     df["flag_survey_late"] = d.notna() & (d > th["late_survey_days"])
     df["flag_fast_completion"] = df["duration_sec"] < th["fast_completion_seconds"]
     df["flag_long_completion"] = df["duration_sec"] > th["long_completion_seconds"]
-    df["flag_repeated_id"] = df["response_id"].duplicated(keep=False)
+    df["flag_repeated_id"] = df["response_id"].notna() & df["response_id"].duplicated(keep=False)
     allk = LIKERT_COLS
     df["flag_straightline_all9"] = df[allk].notna().all(axis=1) & (df[allk].nunique(axis=1) == 1)
     all_post_sd = df[post].notna().all(axis=1) & (df[post] == 1).fillna(False).all(axis=1)   # all three answered and = 1
@@ -584,7 +599,9 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
     amb_cells = meta["ambiguous_cells"]
     amb_total = sum(amb_cells.values())
     amb_rows = int(df["flag_ambiguous_label"].sum())
-    amb_scores = cfg["likert_ambiguous_labels"].get("sensitivity_scores", {})
+    amb_scores = {k: v for k, v in cfg["likert_ambiguous_labels"].get("sensitivity_scores", {}).items() if k in meta["ambiguous_labels"]}
+    amb_names = " / ".join(f"'{l.capitalize()}'" for l in meta["ambiguous_labels"]) or "none"
+    resolved_txt = (" (" + ", ".join(f"'{l.capitalize()}' is now scored {cfg['likert_map'][l]} per config" for l in meta["resolved_labels"]) + ")") if meta["resolved_labels"] else ""
     amb_scores_txt = ", ".join(f"'{k.capitalize()}' = {v}" for k, v in amb_scores.items())
     outside_list = ", ".join(f"{c} ({n})" for c, n in df.loc[df["flag_county_outside_md"], "county"].value_counts().items()) or "none"
     amb_sessions = ", ".join(sorted(df.loc[df["flag_ambiguous_label"], "session_id"].unique())) or "none"
@@ -594,6 +611,8 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
     n_lc_full = int((sess_cov.lc >= 0.8).sum())
     n_lc_none = int((sess_cov.lc <= 0.2).sum())
     n_lc_mixed = len(sess_cov) - n_lc_full - n_lc_none
+    n_lc_any = int(df.loc[df["likely_call_0_10"].notna(), "session_id"].nunique())
+    lc_in_high = int(df.loc[df["session_likely_call_coverage"] >= 0.8, "likely_call_0_10"].notna().sum())
     nosat_sessions = sorted(sess_cov.index[(sess_cov.sat == 0)])
     sat_none_in_nosat = int(((df["sat_items_answered"] == 0) & df["session_id"].isin(nosat_sessions)).sum())
     county_raw_variants = raw[meta["column_map"]["county_raw"]].nunique()
@@ -628,6 +647,9 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
          f"**{int(df['flag_unmapped_value'].sum())} responses**: see §2a and update `cleaning_config.json`"),
     ], columns=["Item", "Value"])
     w(md_table(glance) + "\n")
+    if N < min_n:
+        w(f"> ⚠ **This export has only {N} responses, fewer than the small-group minimum of {min_n}.** Overall figures below describe very few people "
+          "and could identify individuals. Don't share them. Group results are fully suppressed.\n")
 
     # ---------------------------------------------------------------- issues
     w("## 2. Issues found and what was done\n")
@@ -635,15 +657,15 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
               for c in TEXT_COLS}
     issues = [
         ("1", "\"How likely are you to call 988?\" is mostly blank",
-         f"{N - lc_answered:,} of {N:,} blank ({pct(N - lc_answered, N)}). Blanks are all-or-nothing **by session**: {n_lc_full} sessions have ≥80% answered and {n_lc_none} have ≤20%, with {n_lc_mixed} in between (§4b). That points to different form versions, not individuals skipping it.",
-         f"Left blank, never filled in. Every figure for this question uses its {lc_answered} valid answers as the denominator. Those answers come from {n_lc_full} sessions, so they are **not representative** of all participants."),
+         f"{N - lc_answered:,} of {N:,} blank ({pct(N - lc_answered, N)}). Coverage clusters **by session** (date × county group): {n_lc_full} have high coverage (≥80% answered), {n_lc_none} low (≤20%), and {n_lc_mixed} in between (§4b). One possible explanation is that different versions of the form were used. That isn't confirmed.",
+         f"Left blank, never filled in. Every figure for this question uses its {lc_answered} valid answers as the denominator. Those answers come from {n_lc_any} date × county groups, {lc_in_high} of them from the {n_lc_full} high-coverage groups, so they are **not representative** of all participants."),
         ("2", "Satisfaction items use labels that aren't on the agree/disagree scale",
-         f"{amb_rows} responses use \"Very agree\" or \"Satisfied\" ({amb_total} cells: " + ", ".join(f"{c} {n}" for c, n in amb_cells.items() if n) + f"). Sessions: {amb_sessions}. "
+         f"{amb_rows} responses use an unresolved label ({amb_names}) ({amb_total} cells: " + ", ".join(f"{c} {n}" for c, n in amb_cells.items() if n) + f"). Sessions: {amb_sessions}. "
          "The wording \"Neither agree **or** disagree\" (satisfaction) also differs from \"**nor**\" (knowledge).",
-         f"\"Neither agree or disagree\" → neutral (3). \"Very agree\" / \"Satisfied\" cells are **left unscored** until EveryMind confirms their meaning; "
+         f"\"Neither agree or disagree\" → neutral (3). Cells with an unresolved label ({amb_names}) are **left unscored** until EveryMind confirms their meaning{resolved_txt}; "
          f"the respondent's other answers are kept. Scoring them instead as {amb_scores_txt} changes any item's % agree by at most {amb_shift:.1f} points (§6)."),
         ("3", "Satisfaction block not answered",
-         f"{sat_none} responses answered none of the 3 satisfaction items and {sat_part} answered only some. {sat_none_in_nosat} of the {sat_none} come from sessions where nobody answered the block ({', '.join(nosat_sessions) or 'none'}), which again suggests a different form version.",
+         f"{sat_none} responses answered none of the 3 satisfaction items and {sat_part} answered only some. {sat_none_in_nosat} of the {sat_none} come from sessions where nobody answered the block ({', '.join(nosat_sessions) or 'none'}). A different form version is one possible explanation.",
          "Left blank. Each item is reported with its own valid n."),
         ("4", "County typed free-form",
          f"{county_raw_variants} distinct spellings (e.g. 'Montgomery\\xa0', 'Montgomery County ', 'Fairfax county ').",
@@ -670,9 +692,10 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
         ("11", "Comments: response types, other languages, and personal info",
          f"\"Most valuable\": {int(df['text_most_valuable'].notna().sum())} answered ({rt_txt['text_most_valuable']}). "
          f"\"Improve\": {int(df['text_improve'].notna().sum())} answered ({rt_txt['text_improve']}). "
-         f"{int((df['language'] == 'Spanish').sum())} responses used the Spanish form. {int(df['flag_text_redacted'].sum())} responses mention a person's name or a phone number not on the allowlist.",
+         f"{int((df['language'] == 'Spanish').sum())} responses used the Spanish form. {int(df['flag_text_redacted'].sum())} responses had something redacted (a listed name, 'Mr./Ms./Dr. + name', an email, or a phone number not on the allowlist). Unlisted names aren't detected.",
          "Whitespace tidied only, wording untouched. The exact export text is kept in `*_original`. Response types are in `*_type` (blank / nothing / dont_know / no_questions / no_content / substantive). "
-         "`*_redacted` copies replace names and phone numbers. **Use the redacted columns for anything shared outside EveryMind.**"),
+         "`*_redacted` copies replace listed names (any capitalization), 'Mr./Ms./Dr. + name', emails and phone numbers. "
+         "**This is a preliminary, automated pass. It can miss names that aren't listed, so read every excerpt before quoting or sharing it.**"),
         ("12", "Invisible characters",
          "Language labels end in a hidden left-to-right mark (U+200E). Several labels contain non-breaking spaces.",
          "Removed during normalization (logged as `formatting` in the change log)."),
@@ -724,24 +747,26 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
     w(f"**Sessions**: {len(sess)} sessions. Responses per session: median {sess.median():.0f}, range {sess.min()}–{sess.max()}. "
       f"{int((sess < min_n).sum())} sessions have fewer than {min_n} responses. A session is approximated as training date × county, "
       "and the dataset has no session or presenter ID.\n")
-    w("### 4b. Form versions: which optional questions each session answered\n")
-    w("Blank answers cluster by session rather than by person, which points to several versions of the form being used. "
-      "Sessions are grouped by the share of their responses that answered each block (≥80% = asked, ≤20% = not asked).\n")
+    w("### 4b. Response coverage of the optional questions, by session\n")
+    w("Blank answers cluster by session (date × county group) rather than by person. Sessions are grouped by the share of their responses "
+      "that answered each block (≥80% = high coverage, ≤20% = low coverage). **One possible explanation is that different versions of the form were used, "
+      "but the data can't confirm this.** EveryMind would need to.\n")
 
     def band(x):
-        return "asked (≥80%)" if x >= 0.8 else "not asked (≤20%)" if x <= 0.2 else "mixed"
+        return "high coverage (≥80%)" if x >= 0.8 else "low coverage (≤20%)" if x <= 0.2 else "mixed"
 
     sv = sess_cov.assign(likely_call=sess_cov.lc.map(band), satisfaction=sess_cov.sat.map(band))
     ver = sv.groupby(["satisfaction", "likely_call"]).agg(sessions=("n", "size"), responses=("n", "sum")).reset_index()
     ver.columns = ["Satisfaction block", "Likely-to-call question", "Sessions", "Responses"]
     w(md_table(ver) + "\n")
-    lc_sess = sv[sv.likely_call != "not asked (≤20%)"].sort_values("n", ascending=False)
-    w(f"**Where the {lc_answered} 'likely to call 988' answers come from** (sessions with more than 20% answered):\n")
+    lc_sess = sv[sv.likely_call != "low coverage (≤20%)"].sort_values("n", ascending=False)
+    w(f"**Where the {lc_answered} 'likely to call 988' answers come from.** They span {n_lc_any} date × county groups. "
+      f"{lc_in_high} come from the {n_lc_full} high-coverage groups. Groups with more than 20% coverage:\n")
     t = pd.DataFrame({"Session": lc_sess.index, "Responses": lc_sess.n.values,
                       "% answered likely-to-call": [pct(round(x * n), n) for x, n in zip(lc_sess.lc, lc_sess.n)]})
     w(md_table(t) + "\n")
-    w(f"Answers that appear in 'not asked' sessions ({int(df.loc[df['session_likely_call_coverage'] <= 0.2, 'likely_call_0_10'].notna().sum())} responses) "
-      "may be people who entered the wrong training date.\n")
+    w(f"Answers in low-coverage sessions ({int(df.loc[df['session_likely_call_coverage'] <= 0.2, 'likely_call_0_10'].notna().sum())} responses) "
+      "could be people who entered a different training date, or a question that was optional in those sessions. The data can't tell which.\n")
 
     # ---------------------------------------------------------------- flags
     w("## 5. Flags\n")
@@ -753,14 +778,14 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
         ("flag_repeated_id", "Response ID appears more than once", "Review"),
         ("flag_fast_completion", f"Completed in under {th['fast_completion_seconds']} seconds", "Review"),
         ("flag_long_completion", f"Took over {th['long_completion_seconds'] // 60} minutes", "Review"),
-        ("flag_ambiguous_label", "At least one rating used 'Very agree' or 'Satisfied' (those cells unscored)", "Descriptive"),
+        ("flag_ambiguous_label", f"At least one rating used an unresolved label ({amb_names}); those cells are unscored", "Descriptive"),
         ("flag_unmapped_value", "A raw value matched no cleaning rule (see `unmapped_fields`)", "Descriptive"),
         ("flag_straightline_all9", "Same answer to all 9 agree/disagree items", "Descriptive"),
         ("flag_county_outside_md", "Training affiliated with a known non-Maryland county", "Descriptive"),
         ("flag_training_date_missing", "No training date entered", "Descriptive"),
         ("flag_survey_before_training", "Training date is after the submission date", "Descriptive"),
         ("flag_survey_late", f"Submitted more than {th['late_survey_days']} days after the training", "Descriptive"),
-        ("flag_text_redacted", "Comment contained a name or a non-allowlisted phone number", "Descriptive"),
+        ("flag_text_redacted", "Automated redaction changed the comment (listed name, Mr./Ms./Dr. + name, email, or non-allowlisted phone). Unlisted names aren't detected", "Descriptive"),
         ("pattern_any_decline", "At least one knowledge item rated lower after than before", "Descriptive"),
         ("pattern_no_change", "All 3 knowledge items identical before and after", "Descriptive"),
     ]
@@ -814,7 +839,7 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
         srows.append({"Item": "Likely to recommend: NPS", "Sample": name, "Valid pairs": ns2["n"], "Change in % agree": "", "Mean self-rated change [95% CI]": ns2["nps"]})
     w(md_table(pd.DataFrame(srows)) + "\n")
     w("### Sensitivity check 2: scoring the ambiguous labels\n")
-    w(f"Primary figures leave 'Very agree' / 'Satisfied' unscored. This shows what changes if they are scored as {amb_scores_txt}.\n")
+    w(f"Primary figures leave unresolved labels ({amb_names}) unscored. This shows what changes if they are scored as {amb_scores_txt or '(no unresolved labels)'}.\n")
     arows = []
     for c, lab in SAT_ITEMS.items():
         s, alt = df[c].dropna(), scored_alt(c).dropna()
@@ -831,7 +856,7 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
       f"Groups of {min_n}–{thin_n - 1} are labeled *thin* and are descriptive only. These are project guardrails, not a guarantee that larger groups are representative.\n")
     w("**How to read these tables.** Groups are ordered by size, not by score. This is **not a ranking**. Differences are exploratory and not adjusted for other factors. "
       "Before attributing a gap to training quality, check (a) the *before* % agree, because groups that start high have less room to rise, "
-      "(b) the survey months and number of sessions, because different months used different form versions (§4b), and (c) composition, e.g. role mix by county (§4). "
+      "(b) the survey months and number of sessions, because question coverage differs across sessions and months (§4b), and (c) composition, e.g. role mix by county (§4). "
       "*Likely to call 988* comes only from the sessions in §4b, so don't compare groups on it.\n")
     for col, title, d, flt in [("role_group", "Role", df, "all valid responses"),
                                ("county", "County (training affiliation)", df, "all valid responses"),
@@ -853,7 +878,7 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
     for item in [
         "**Retrospective \"before\" ratings.** Change scores are likely inflated relative to a true pre-test. A real pre-survey would fix this, even for a sample of sessions.",
         "**Self-report only.** No measure of tested knowledge, actual 988 use, or mental-health outcomes.",
-        f"**\"Likely to call 988\" coverage.** Answered by only {pct(lc_answered, N)} of respondents, from {n_lc_full} sessions.",
+        f"**\"Likely to call 988\" coverage.** Answered by only {pct(lc_answered, N)} of respondents, across {n_lc_any} date × county groups (mostly the {n_lc_full} high-coverage ones).",
         f"**Ambiguous labels.** {amb_total} satisfaction cells are unscored until their meaning is confirmed. The sensitivity check shows the effect is small.",
         "**No session or presenter ID.** Sessions are approximated by training date × county. A self-entered training date can be wrong, and several groups can share a date.",
         "**County and language.** County is the training's affiliation, not residence. Form language isn't necessarily native or training language.",
@@ -861,7 +886,7 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
         "**Selection.** Attendance per session is unknown, so the response rate and non-response bias can't be estimated.",
         "**Judgment-call flags.** Scale-reversal, duplicate and duration flags are heuristics. Thresholds are in `cleaning_config.json`, and nothing is excluded by default.",
         "**Suppression scope.** Pooling and complementary suppression are applied and checked within each table. A determined reader comparing figures *across* different tables (e.g. role vs. county) might still narrow down a small group's result. Keep that in mind before publishing new cross-tabulations.",
-        f"**Questions for EveryMind:** (a) Did the form change during the year (likely-to-call and satisfaction blocks)? (b) What did 'Very agree' and 'Satisfied' mean on the forms used in {amb_sessions}? (c) Should trainings affiliated with {outside_list} be in scope? (d) Is 410-768-5522 the crisis line taught in training?",
+        f"**Questions for EveryMind:** (a) Did the form change during the year (likely-to-call and satisfaction blocks)? (b) What did {amb_names} mean on the forms used in {amb_sessions}? (c) Should trainings affiliated with {outside_list} be in scope? (d) Is 410-768-5522 the crisis line taught in training?",
     ]:
         w(f"- {item}")
     w("")
@@ -903,7 +928,10 @@ def data_dictionary(df: pd.DataFrame) -> pd.DataFrame:
         "likely_call_0_10": "Likelihood to call 988 (0-10); mostly blank, see report",
         "sat_items_answered": "Satisfaction items with any answer, incl. ambiguous labels (0-3)", "sat_items_scored": "Satisfaction items with a 1-5 score (0-3)", "satisfaction_mean": "Mean of 3 satisfaction items (only if all 3 scored); used only for the scale-reversal flag",
         "session_id": "Approximate session: training date / county", "session_n": "Responses in this session_id",
-        "duplicate_of_id": "response_id of the earlier identical response, if flagged", "review_flag_count": "Number of review flags set", "in_sensitivity_sample": "True if no review flag is set (used for the sensitivity check only)",
+        "duplicate_of_id": "response_id of the earlier identical response, if flagged",
+        "recommend_0_10_original": "Recommend answer exactly as exported", "likely_call_0_10_original": "Likely-to-call answer exactly as exported",
+        "session_likely_call_coverage": "Share of this session's responses that answered the likely-to-call question (0-1)",
+        "session_satisfaction_coverage": "Share of this session's responses that answered any satisfaction item (0-1)", "review_flag_count": "Number of review flags set", "in_sensitivity_sample": "True if no review flag is set (used for the sensitivity check only)",
         "unmapped_fields": "Columns whose raw value matched no cleaning rule", "answered_blocks": "Optional question blocks this response answered",
     }
     for k, v in KNOWLEDGE_ITEMS.items():
@@ -914,7 +942,7 @@ def data_dictionary(df: pd.DataFrame) -> pd.DataFrame:
         desc[k] = f"{v} (1-5)"
     for c in TEXT_COLS:
         desc[c] = "Comment, whitespace tidied, wording unchanged. INTERNAL USE (may contain names)"
-        desc[f"{c}_redacted"] = "Comment with names/phone numbers replaced. Safe to share"
+        desc[f"{c}_redacted"] = "Comment with listed names, Mr./Ms./Dr. + name, emails and phone numbers replaced. PRELIMINARY: automated redaction can miss names, so review manually before quoting or sharing"
         desc[f"{c}_original"] = "Comment exactly as exported"
         desc[f"{c}_type"] = "blank / nothing / dont_know / no_questions / no_content / substantive"
     rows = []
