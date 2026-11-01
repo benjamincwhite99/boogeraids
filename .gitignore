@@ -5,6 +5,9 @@
 *.pdf
 output/
 tmp/
+# temporary folders a killed clean.py run can leave behind (they contain survey data)
+.*.staging-*/
+.*.backup-*/
 redaction_names.local.json
 
 # Python / OS

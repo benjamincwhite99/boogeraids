@@ -108,7 +108,21 @@ def report_text(out):
 
 def bundle_hashes(out):
     import hashlib
-    return {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(Path(out).glob("*")) if f.is_file()}
+    return {f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in sorted(Path(out).glob("*")) if f.is_file() and not f.name.startswith(".")}
+
+
+def tables_well_formed(md):
+    """Every row of every Markdown table has as many unescaped '|' as its header row."""
+    count = lambda l: len(re.findall(r"(?<!\\)\|", l))
+    table = []
+    for line in md.splitlines() + [""]:
+        if line.startswith("|"):
+            table.append(count(line))
+        elif table:
+            if len(set(table)) != 1:
+                return False
+            table = []
+    return True
 
 
 def write_xlsx(rows, path):
@@ -304,8 +318,86 @@ def main():
         mutated("workbook replaced with junk", lambda d: (d / "clean_responses.xlsx").write_bytes(b"not an Excel workbook"), "workbook: readable")
         mutated("report from another run", lambda d: (d / "data_quality_report.md").write_text("stale"), "matches the run manifest")
 
-        # --- finding 4: survey text that looks like a formula stays literal text
         import openpyxl
+        # --- review 4: publishing, locks, encodings, characters spreadsheets can't hold, full workbook check
+        import hashlib, os, time
+        for stage in ["publish:0", "publish:2", "publish:5"]:          # fail before / during / just before the manifest
+            p = run([str(other), "--config", str(cfgp), "--out", str(tmp / "o_pub")], env={"CLEAN_PY_TEST_FAIL_AT": stage})
+            check(f"move failure at {stage}: previous bundle restored exactly",
+                  p.returncode != 0 and bundle_hashes(tmp / "o_pub") == before and not list(tmp.glob(".o_pub.*")))
+        check("bundle validates after failed publishes", validate(good, tmp / "o_pub", cfgp)[0] == 0)
+
+        sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        (tmp / "o_pub" / ".clean.lock").write_text(str(sleeper.pid))
+        p = run([str(good), "--config", str(cfgp), "--out", str(tmp / "o_pub")])
+        sleeper.kill()
+        check("a live lock blocks a second run, with a clear message", p.returncode != 0 and "Another clean.py run" in p.stderr
+              and bundle_hashes(tmp / "o_pub") == before)
+        sleeper.wait()
+        (tmp / "o_pub" / ".clean.lock").write_text(str(sleeper.pid))  # that process is gone now: a stale lock
+        p = run([str(good), "--config", str(cfgp), "--out", str(tmp / "o_pub")])
+        check("a stale lock from a killed run is cleared", p.returncode == 0 and not (tmp / "o_pub" / ".clean.lock").exists(), p.stderr[-200:])
+
+        ctrl = [dict(r) for r in base]
+        ctrl[0][H["improve"]] = "line one\x0bline two\x01"
+        ctrl[1][H["county"]] = "Montgomery | MD"
+        ctrl[2][H["recommend"]] = "10 "
+        csv_c = tmp / "ctrl.csv"
+        pd.DataFrame(ctrl, columns=HEADERS).to_csv(csv_c, index=False)
+        p = run([str(csv_c), "--config", str(cfgp), "--out", str(tmp / "o_ctrl")])
+        if p.returncode == 0:
+            dc = read_clean(tmp / "o_ctrl")
+            wb = openpyxl.load_workbook(tmp / "o_ctrl" / "clean_responses.xlsx")
+            hdr = [c.value for c in wb["clean_responses"][1]]
+            xl_orig = wb["clean_responses"].cell(row=2, column=hdr.index("text_improve_original") + 1).value
+            check("control characters: run completes, CSV keeps exact text, workbook shows �",
+                  dc.loc[0, "text_improve_original"] == "line one\x0bline two\x01" and xl_orig == "line one\ufffdline two\ufffd")
+            rep = report_text(tmp / "o_ctrl")
+            check("a '|' inside a value doesn't break report tables", "Montgomery \\| MD" in rep and tables_well_formed(rep))
+            raw_text = pd.read_csv(tmp / "o_ctrl" / "clean_responses.csv", dtype=object, keep_default_na=False, na_values=[""])
+            check("'10 ' kept exactly as the original answer, read as 10", raw_text.loc[2, "recommend_0_10_original"] == "10 " and dc.loc[2, "recommend_0_10"] == 10)
+            check("control-character export validates", validate(csv_c, tmp / "o_ctrl", cfgp)[0] == 0, "; ".join(validate(csv_c, tmp / "o_ctrl", cfgp)[1])[:300])
+        else:
+            check("control-character run", False, p.stderr[-300:])
+
+        win = [dict(r, **{H["lang"]: "English (United States)"}) for r in base]
+        win[0][H["lang"]] = "Español (México)"
+        win[0][H["valuable"]] = "¿qué aprendí?"
+        csv_w = tmp / "win.csv"
+        pd.DataFrame(win, columns=HEADERS).to_csv(csv_w, index=False, encoding="cp1252")
+        p = run([str(csv_w), "--config", str(cfgp), "--out", str(tmp / "o_win")])
+        ok = p.returncode == 0 and read_clean(tmp / "o_win").loc[0, "language"] == "Spanish" and read_clean(tmp / "o_win").loc[0, "text_most_valuable"] == "¿qué aprendí?"
+        check("Windows-1252 CSV (Excel's default on Windows) reads correctly and validates", ok and validate(csv_w, tmp / "o_win", cfgp)[0] == 0, p.stderr[-200:])
+
+        before = bundle_hashes(tmp / "o_pub")                         # fresh baseline (the stale-lock test republished)
+        (tmp / "old.xls").write_text("x")
+        (tmp / "fake.xlsx").write_text("not a workbook")
+        for name, path, expect in [("missing file", tmp / "nothere.xlsx", "not found"), ("old .xls", tmp / "old.xls", "Save As"),
+                                   ("not a workbook", tmp / "fake.xlsx", "couldn't be read")]:
+            p = run([str(path), "--config", str(cfgp), "--out", str(tmp / "o_pub")])
+            check(f"bad input ({name}): clear message, no traceback, bundle untouched",
+                  p.returncode != 0 and expect in p.stderr and "Traceback" not in p.stderr and bundle_hashes(tmp / "o_pub") == before)
+        other_cfg = json.loads(cfgp.read_text())
+        other_cfg["thresholds"]["fast_completion_seconds"] = 45
+        (tmp / "other_cfg.json").write_text(json.dumps(other_cfg))
+        code, fails, err = validate(good, tmp / "o_pub", tmp / "other_cfg.json")
+        check("validator flags validating with a different config than the run used", code != 0 and any("same config" in f for f in fails))
+
+        # one wrong workbook cell, with the manifest hash forged so only the full value comparison can catch it
+        d = tmp / "mut_cell"
+        shutil.copytree(tmp / "o_pub", d)
+        wb = openpyxl.load_workbook(d / "clean_responses.xlsx")
+        hdr = [c.value for c in wb["clean_responses"][1]]
+        wb["clean_responses"].cell(row=10, column=hdr.index("sat_organized") + 1).value = 1
+        wb.save(d / "clean_responses.xlsx")
+        m = json.loads((d / "run_manifest.json").read_text())
+        m["files"]["clean_responses.xlsx"] = hashlib.sha256((d / "clean_responses.xlsx").read_bytes()).hexdigest()
+        (d / "run_manifest.json").write_text(json.dumps(m))
+        code, fails, err = validate(good, d, cfgp)
+        check("validator catches one altered workbook cell even with a forged manifest", code != 0 and any("every value in 'clean_responses'" in f for f in fails),
+              "; ".join(fails)[:300])
+
+        # --- finding 4: survey text that looks like a formula stays literal text
         f_rows = [dict(r) for r in base]
         f_rows[0][H["improve"]] = "=1+1"
         f_rows[1][H["valuable"]] = '=HYPERLINK("http://example.com","click")'

@@ -32,9 +32,11 @@ Outputs go to `output/`:
 | `data_quality_report.md` | Issues found, what was done, completeness, sample composition, response-coverage patterns, and baseline figures with sample sizes. |
 | `run_manifest.json` | Which input, config and code produced this bundle, package versions, and a fingerprint (SHA-256) of every file above. |
 
-**A run publishes all of these together or not at all.** Everything is built in a temporary folder and moved into `output/` only after every step succeeds. If a run fails, `output/` keeps the previous successful bundle unchanged. `validate_clean.py` checks every file against `run_manifest.json`, so files from different runs can't be mixed unnoticed. Other files you keep in `output/` (e.g. review notes) are left alone.
+**A run publishes all of these together or not at all.** Everything is built in a temporary folder first. The previous bundle is then moved aside and the new one moved in. If any step fails, including a single file move, the previous bundle is put back exactly as it was. `validate_clean.py` checks every file against `run_manifest.json`, so files from different runs can't be mixed unnoticed. Only one run can write to an output folder at a time (a `.clean.lock` file; a lock left by a killed run is cleared automatically). Other files you keep in `output/` (e.g. review notes) are left alone.
 
-The workbook stores all survey text as plain text. A comment such as `=1+1` stays text and never becomes an Excel formula.
+**Open `clean_responses.xlsx` in Excel, not the CSV.** The workbook stores all survey text as plain text, so a comment such as `=1+1` never becomes a formula. Characters an Excel file can't hold (e.g. a line break pasted from Word) appear as `�` there. The CSVs keep the exact original text for analysis in Python or R, but Excel may treat a CSV cell starting with `=` as a formula. The report (issue 13) counts any such comments.
+
+**Inputs:** `.xlsx` or `.csv`. CSVs can be UTF-8 or Windows-1252, which is Excel's default "CSV" on Windows. The report records which one was used. Old `.xls` files need to be re-saved as `.xlsx`.
 
 ## Rules the pipeline follows
 
@@ -54,7 +56,7 @@ If EveryMind confirms what "Very agree" or "Satisfied" meant, set its score in `
 
 ## Changing the config
 
-Rating labels, role labels, language prefixes, county aliases, thresholds and the slash-date order can all be changed in `cleaning_config.json`. `clean.py` checks the config first and stops with a clear message if a value can't be applied (e.g. a rating of 7). `validate_clean.py` reads the same settings and applies them with its own code. Pass it the same `--config` if you used one.
+Rating labels, role labels, language prefixes, county aliases, thresholds and the slash-date order can all be changed in `cleaning_config.json`. `clean.py` checks the config first and stops with a clear message if a value can't be applied (e.g. a rating of 7). `validate_clean.py` reads the same settings and applies them with its own code. Pass it the same `--config` you ran with; it checks the config against the run's manifest. It compares every value in every sheet of the workbook against its source.
 
 ## When a new export has something unexpected
 

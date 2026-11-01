@@ -77,8 +77,23 @@ if missing_files:
     finish()
 
 LIT = dict(keep_default_na=False, na_values=[""])           # keep literal answers such as "None" as text
-raw = pd.read_csv(a.raw, dtype=object, **LIT) if a.raw.lower().endswith(".csv") else pd.read_excel(a.raw, dtype=object, **LIT)
+def read_raw(path):
+    if not path.lower().endswith(".csv"):
+        return pd.read_excel(path, dtype=object, **LIT)
+    for enc in ("utf-8-sig", "cp1252"):                       # UTF-8, then Excel's default CSV encoding on Windows
+        try:
+            return pd.read_csv(path, dtype=object, encoding=enc, **LIT)
+        except UnicodeDecodeError:
+            pass
+    sys.exit(f"validator: {path} is neither UTF-8 nor Windows-1252 text")
+
+
+raw = read_raw(a.raw)
 clean = pd.read_csv(OUT / "clean_responses.csv", low_memory=False, **LIT)
+clean_str = pd.read_csv(OUT / "clean_responses.csv", dtype=object, **LIT)   # exact text, no type guessing
+for c in clean.columns:                                      # text and preserved originals must stay exact strings ("10 ", "007")
+    if c.endswith(("_original", "_redacted")) or c in ("text_most_valuable", "text_improve"):
+        clean[c] = clean_str[c]
 log = pd.read_csv(OUT / "change_log.csv", **LIT)
 gt = pd.read_csv(OUT / "group_tables.csv", **LIT)
 report = (OUT / "data_quality_report.md").read_text()
@@ -90,6 +105,8 @@ try:
     check("bundle: every file matches the run manifest (one run, nothing mixed or altered)", ok,
           str([f for f, h in manifest.get("files", {}).items() if (OUT / f).exists() and sha256(OUT / f) != h]))
     check("bundle: manifest was made from this raw file", manifest["input"]["sha256"] == sha256(a.raw))
+    check("bundle: validating with the same config the run used", manifest["config"]["sha256"] == sha256(a.config),
+          f"run used {manifest['config'].get('name')}; pass it with --config")
     check("bundle: manifest row count matches", manifest["rows"] == len(clean) == len(raw))
 except (json.JSONDecodeError, KeyError) as e:
     check("bundle: run manifest readable", False, repr(e))
@@ -410,37 +427,74 @@ check("group tables: every shown value is a number matching raw", not problems["
 check("group tables: suppression rules hold (no small cells, no subtraction leaks)", not problems["status"], str(problems["status"][:5]))
 check(f"group tables: 'thin' label exactly when a figure's own n < {THIN_N}", not problems["label"], str(problems["label"][:5]))
 
-# ------------------------------------------------------------------------------- 11. workbook
+# ------------------------------------------------------------------------------- 11. workbook (every value of every sheet)
+XLSX_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def same_cell(x, expected):
+    """x = value read from the workbook; expected = source value. Control characters an .xlsx can't hold
+    are expected as U+FFFD; numbers compare by value (8 vs 8.0); timestamps compare as timestamps."""
+    if isinstance(expected, str):
+        expected = XLSX_ILLEGAL.sub("\ufffd", expected)
+    if (blank(x) and blank(expected)) or str(x) == str(expected):
+        return True
+    num = (int, float)
+    if isinstance(x, num) and not isinstance(x, bool) and isinstance(expected, str):
+        try:
+            return float(expected) == float(x) and expected.strip() == expected   # "4" vs 4, but "10 " is not 10
+        except ValueError:
+            return False
+    if isinstance(x, num) and isinstance(expected, num) and not isinstance(x, bool) and not isinstance(expected, bool):
+        return float(x) == float(expected)
+    if hasattr(x, "year") and isinstance(expected, str):
+        try:
+            return pd.Timestamp(x) == pd.Timestamp(expected)
+        except ValueError:
+            return False
+    return False
+
+
+def frame_diffs(sheet_df, source_df):
+    """List of (column, row, workbook value, expected) for every mismatch, plus column/row shape problems."""
+    if list(sheet_df.columns) != [str(c) for c in source_df.columns]:
+        return [("columns", None, list(sheet_df.columns)[:5], list(source_df.columns)[:5])]
+    if len(sheet_df) != len(source_df):
+        return [("rows", None, len(sheet_df), len(source_df))]
+    out = []
+    for i, c in enumerate(source_df.columns):
+        for r, (x, e) in enumerate(zip(sheet_df.iloc[:, i], source_df.iloc[:, i])):
+            if not same_cell(x, e):
+                out.append((c, r + 2, x, e))
+                break                                         # one example per column is enough
+    return out
+
+
 try:
     import openpyxl
     wb = openpyxl.load_workbook(OUT / "clean_responses.xlsx")
-    check("workbook: opens with the expected sheets",
-          set(wb.sheetnames) == {"clean_responses", "data_dictionary", "change_log", "flag_summary", "group_tables", "raw_original"}, str(wb.sheetnames))
+    expected_sheets = ["clean_responses", "data_dictionary", "change_log", "flag_summary", "group_tables", "raw_original"]
+    check("workbook: opens with exactly the expected sheets", wb.sheetnames == expected_sheets, str(wb.sheetnames))
     formulas = [(ws.title, c.coordinate) for ws in wb for row in ws.iter_rows() for c in row if c.data_type == "f"]
     check("workbook: no cell is an Excel formula (survey text stays text)", not formulas, str(formulas[:5]))
 
     def sheet(name):
-        rows = list(wb[name].iter_rows(values_only=True))
-        return pd.DataFrame(rows[1:], columns=rows[0])
+        rows = list(wb[name].iter_rows(values_only=True)) if name in wb.sheetnames else [()]
+        return pd.DataFrame(rows[1:], columns=[str(c) for c in rows[0]])
 
-    def same_cell(p, q):
-        if (blank(p) and blank(q)) or str(p) == str(q):
-            return True
-        num = (int, float)
-        return isinstance(p, num) and isinstance(q, num) and not isinstance(p, bool) and float(p) == float(q)   # 8 vs 8.0
-
-    def same_cells(x, y):
-        return all(same_cell(p, q) for p, q in zip(x, y))
-
-    cr = sheet("clean_responses")
-    check("workbook: clean_responses sheet has every row", len(cr) == len(clean))
-    check("workbook: clean_responses sheet matches the CSV",
-          len(cr) == len(clean) and all(same_cells(cr[c], clean[c]) for c in ["source_row", "post_identify", "sat_engaged", "county",
-                                                                              "text_improve_original", "text_most_valuable_original", "flag_possible_duplicate"]))
-    ro = sheet("raw_original")
-    check("workbook: raw_original sheet matches the source file",
-          len(ro) == len(raw) and list(ro.columns) == list(raw.columns) and all(same_cells(ro[c], raw[c]) for c in raw.columns))
-    check("workbook: group_tables sheet matches the CSV", len(sheet("group_tables")) == len(gt))
+    flag_cols = [c for c in clean.columns if c.startswith(("flag_", "pattern_"))]
+    expected_flags = pd.DataFrame({"flag": flag_cols, "responses": [int(B(c).sum()) for c in flag_cols]})
+    expected_dict_cols = list(clean.columns)
+    log_str = pd.read_csv(OUT / "change_log.csv", dtype=object, **LIT)
+    gt_str = pd.read_csv(OUT / "group_tables.csv", dtype=object, **LIT)
+    clean_str.index = clean.index
+    for name, source in [("clean_responses", clean_str), ("change_log", log_str), ("group_tables", gt_str), ("raw_original", raw),
+                         ("flag_summary", expected_flags)]:
+        d = frame_diffs(sheet(name), source)
+        check(f"workbook: every value in '{name}' matches its source", not d, str(d[:3])[:300])
+    dd = sheet("data_dictionary")
+    check("workbook: data dictionary lists every column with its non-blank count",
+          list(dd.get("column", [])) == expected_dict_cols and
+          all(int(n) == int(clean[c].notna().sum()) for c, n in zip(dd["column"], dd["non_blank"])) and dd["description"].notna().all())
 except Exception as e:                                       # a corrupt or unreadable workbook is a failure, not a crash
     check("workbook: readable", False, repr(e)[:200])
 

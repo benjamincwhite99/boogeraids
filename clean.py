@@ -191,12 +191,28 @@ class ChangeLog:
 
 
 # --------------------------------------------------------------------------- loading
-def load_raw(path: Path) -> pd.DataFrame:
-    """Only truly empty cells become missing. pandas' default would also turn literal answers such as
-    'None', 'NA' or 'null' into blanks, and those are real comments."""
+CSV_ENCODINGS = ["utf-8-sig", "cp1252"]   # UTF-8 (with or without BOM), then Excel's default "CSV" encoding on Windows
+
+
+def load_raw(path: Path):
+    """-> (DataFrame, encoding). Only truly empty cells become missing: pandas' default would also turn
+    literal answers such as 'None', 'NA' or 'null' into blanks, and those are real comments."""
+    if not path.is_file():
+        sys.exit(f"Input file not found: {path}")
+    if path.suffix.lower() not in (".csv", ".xlsx", ".xlsm"):
+        sys.exit(f"{path.name}: expected a Microsoft Forms export saved as .xlsx or .csv"
+                 + (" (old .xls files: open in Excel and 'Save As' .xlsx)" if path.suffix.lower() == ".xls" else ""))
     if path.suffix.lower() == ".csv":
-        return pd.read_csv(path, dtype=object, keep_default_na=False, na_values=[""])
-    return pd.read_excel(path, dtype=object, keep_default_na=False, na_values=[""])
+        for enc in CSV_ENCODINGS:
+            try:
+                return pd.read_csv(path, dtype=object, keep_default_na=False, na_values=[""], encoding=enc), enc
+            except UnicodeDecodeError:
+                continue
+        sys.exit(f"{path.name} isn't readable as UTF-8 or Windows-1252 text. Re-export it as 'CSV UTF-8' or .xlsx.")
+    try:
+        return pd.read_excel(path, dtype=object, keep_default_na=False, na_values=[""]), "xlsx"
+    except Exception as e:                                   # corrupt or not really an Excel file
+        sys.exit(f"{path.name} couldn't be read as an Excel workbook ({type(e).__name__}). Re-export it from Forms.")
 
 
 def map_columns(raw: pd.DataFrame, spec: dict) -> tuple[dict, list]:
@@ -503,8 +519,11 @@ def md_table(frame: pd.DataFrame, index: bool = False) -> str:
     f = frame.reset_index() if index else frame
     cols = [str(c) for c in f.columns]
     lines = ["| " + " | ".join(cols) + " |", "|" + "|".join("---" for _ in cols) + "|"]
+    def cell(v):     # a '|' or line break inside a value would otherwise break the table
+        return "" if pd.isna(v) else str(v).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
     for _, row in f.iterrows():
-        lines.append("| " + " | ".join("" if pd.isna(v) else str(v) for v in row.values) + " |")
+        lines.append("| " + " | ".join(cell(v) for v in row.values) + " |")
     return "\n".join(lines)
 
 
@@ -723,6 +742,10 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
             shifts.append(abs((alt >= 4).mean() - (cur >= 4).mean()) * 100)
     amb_shift_txt = f"at most {max(shifts):.1f} points" if shifts else "an unknown amount (no scored answers to compare)"
     rtype = {c: df[f"{c}_type"].value_counts() for c in TEXT_COLS}
+    texts = pd.concat([df[c] for c in TEXT_COLS] + [df[f"{c}_original"] for c in TEXT_COLS]).dropna().astype(str)
+    n_formula = int(pd.concat([df[c] for c in TEXT_COLS]).dropna().astype(str).str.lstrip().str[:1].isin(["=", "+", "-", "@"]).sum())
+    n_ctrl = int(pd.concat([df[f"{c}_original"] for c in TEXT_COLS]).dropna().astype(str).str.contains(XLSX_ILLEGAL).sum())
+    n_long = int((texts.str.len() > 32767).sum())
 
     # ---------------------------------------------------------------- header
     w("# Data Quality Report: EveryMind 988 Training Survey\n")
@@ -737,6 +760,7 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
     dates = df["start_time"]
     glance = pd.DataFrame([
         ("Responses (rows in = rows out)", f"{len(raw):,} in → {N:,} out"),
+        ("Input file read as", {"xlsx": "Excel workbook", "utf-8-sig": "CSV, UTF-8", "cp1252": "CSV, Windows-1252 (Excel's default CSV encoding on Windows)"}.get(meta.get("encoding"), str(meta.get("encoding")))),
         ("Survey submission dates", f"{dates.min():%b %d, %Y} to {dates.max():%b %d, %Y}" if dates.notna().any() else "unavailable (no readable start times)"),
         ("Training sessions (training date × county)", f"{df['session_id'].nunique()} ({int((df.groupby('session_id').size() < min_n).sum())} with fewer than {min_n} responses)"),
         ("Responses with a review flag (kept; see §5)", f"{int((~df['in_sensitivity_sample']).sum())} ({pct((~df['in_sensitivity_sample']).sum(), N)})"),
@@ -798,6 +822,10 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
         ("12", "Invisible characters",
          "Language labels end in a hidden left-to-right mark (U+200E). Several labels contain non-breaking spaces.",
          "Removed during normalization (logged as `formatting` in the change log)."),
+        ("13", "Text that spreadsheets treat specially",
+         f"{n_formula} comments start with =, +, - or @, {n_ctrl} contain control characters an Excel file can't store (e.g. a pasted Word line break), and {n_long} are longer than Excel's 32,767-character cell limit.",
+         "The CSVs keep the exact text. In `clean_responses.xlsx`, all text is stored as plain text (never a formula), and control characters are replaced with �. "
+         "**Open the .xlsx in Excel, not the .csv**: Excel may treat a CSV cell starting with = as a formula." + (" Comments over the cell limit will be cut off in Excel; use the CSV for those." if n_long else "")),
     ]
     w(md_table(pd.DataFrame(issues, columns=["#", "Issue", "What we found", "Action"])) + "\n")
 
@@ -1062,6 +1090,53 @@ def data_dictionary(df: pd.DataFrame) -> pd.DataFrame:
 
 # --------------------------------------------------------------------------- main
 OUTPUT_FILES = ["clean_responses.csv", "change_log.csv", "group_tables.csv", "data_quality_report.md", "clean_responses.xlsx"]
+BUNDLE = OUTPUT_FILES + ["run_manifest.json"]
+
+
+def acquire_lock(out: Path) -> Path:
+    """One run per output folder at a time, so two runs can't interleave their publishing."""
+    lock = out / ".clean.lock"
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            pid = int(lock.read_text().strip() or 0)
+            os.kill(pid, 0)                                  # raises if that process no longer exists
+        except PermissionError:
+            pass                                             # process exists (another user's): the lock is live
+        except (ValueError, ProcessLookupError):
+            lock.unlink(missing_ok=True)                     # stale lock from a run that was killed
+            return acquire_lock(out)
+        sys.exit(f"Another clean.py run (pid {pid}) is writing to {out}/. Wait for it to finish, then retry.")
+    with os.fdopen(fd, "w") as f:
+        f.write(str(os.getpid()))
+    return lock
+
+
+def publish(staging: Path, out: Path):
+    """Swap the new bundle into place as one unit. The previous bundle is moved aside first; if any move
+    fails, every new file placed so far is removed and the previous bundle is restored."""
+    backup = out.parent / f".{out.name}.backup-{os.getpid()}"
+    shutil.rmtree(backup, ignore_errors=True)
+    backup.mkdir()
+    moved_aside, placed = [], []
+    try:
+        for f in BUNDLE:
+            if (out / f).exists():
+                os.replace(out / f, backup / f)
+                moved_aside.append(f)
+        for i, f in enumerate(BUNDLE):                         # manifest is last
+            test_failure_point(f"publish:{i}")
+            os.replace(staging / f, out / f)
+            placed.append(f)
+    except BaseException:
+        for f in placed:
+            (out / f).unlink(missing_ok=True)
+        for f in moved_aside:
+            os.replace(backup / f, out / f)
+        raise
+    finally:
+        shutil.rmtree(backup, ignore_errors=True)
 
 
 def test_failure_point(stage: str):
@@ -1070,12 +1145,20 @@ def test_failure_point(stage: str):
         raise RuntimeError(f"test-induced failure at {stage}")
 
 
+XLSX_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")   # control characters an .xlsx file cannot store
+
+
+def xlsx_safe(frame: pd.DataFrame) -> pd.DataFrame:
+    """Replace characters Excel can't store with U+FFFD. Only the workbook copy changes; the CSVs keep the exact text."""
+    return frame.apply(lambda col: col.map(lambda v: XLSX_ILLEGAL.sub("\ufffd", v) if isinstance(v, str) else v))
+
+
 def write_workbook(path: Path, sheets: dict):
     """Write sheets with every cell as a plain value. A survey answer such as '=1+1' would otherwise
     become an Excel formula; this pipeline never writes formulas, so every formula cell is forced to text."""
     with pd.ExcelWriter(path, engine="openpyxl") as w:
         for name, frame in sheets.items():
-            frame.to_excel(w, sheet_name=name, index=False)
+            xlsx_safe(frame).to_excel(w, sheet_name=name, index=False)
             for row in w.sheets[name].iter_rows():
                 for cell in row:
                     if cell.data_type == "f":
@@ -1092,17 +1175,18 @@ def main(argv=None):
     in_path, out, cfg_path = Path(a.input), Path(a.out), Path(a.config)
     cfg = strip_comments(json.loads(cfg_path.read_text()))
     validate_config(cfg)
-    raw = load_raw(in_path)
+    raw, encoding = load_raw(in_path)
     if len(raw) == 0:
         sys.exit(f"{in_path.name} contains no responses. Nothing was written, and {out}/ is unchanged.")
 
     # Build the whole bundle in a staging folder next to the output folder. Files are moved into place
     # only after every step succeeds, so a failed run never leaves new and old files mixed together.
     out.mkdir(parents=True, exist_ok=True)
+    lock = acquire_lock(out)
     staging = out.parent / f".{out.name}.staging-{os.getpid()}"
-    shutil.rmtree(staging, ignore_errors=True)
-    staging.mkdir(parents=True)
-    try:
+    try:                                                     # everything after taking the lock is inside try, so it is always released
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir(parents=True)
         log = ChangeLog()
         df, meta = clean(raw, cfg, log)
         assert len(df) == len(raw), "row count changed"
@@ -1111,6 +1195,7 @@ def main(argv=None):
         logf.to_csv(staging / "change_log.csv", index=False)
 
         test_failure_point("report")
+        meta["encoding"] = encoding
         report, groups = build_report(raw, df, meta, cfg, logf, in_path)
         (staging / "data_quality_report.md").write_text(report)
         groups.to_csv(staging / "group_tables.csv", index=False)
@@ -1128,7 +1213,7 @@ def main(argv=None):
         manifest = {
             "run_id": datetime.now().strftime("%Y%m%dT%H%M%S") + f"-{os.getpid()}",
             "rows": len(df),
-            "input": {"name": in_path.name, "sha256": sha256(in_path)},
+            "input": {"name": in_path.name, "sha256": sha256(in_path), "encoding": encoding},
             "config": {"name": cfg_path.name, "sha256": sha256(cfg_path)},
             "code": {"clean.py": sha256(Path(__file__))},
             "versions": {"python": platform.python_version(), "pandas": pd.__version__,
@@ -1137,15 +1222,13 @@ def main(argv=None):
         }
         (staging / "run_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
-        # Publish: data files first, manifest last. validate_clean.py checks every file against the manifest,
-        # so an interrupted publish is detectable rather than silently mixed.
-        for f in OUTPUT_FILES + ["run_manifest.json"]:
-            os.replace(staging / f, out / f)
+        publish(staging, out)
     except BaseException:
         print(f"Run failed; nothing was published, and {out}/ still holds the previous successful run (if any).", file=sys.stderr)
         raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+        lock.unlink(missing_ok=True)
 
     if meta["unmapped"]:
         print(f"WARNING: {int(df['flag_unmapped_value'].sum())} responses contain values no rule in cleaning_config.json covers "
@@ -1154,7 +1237,7 @@ def main(argv=None):
             print(f"    {u['column']}: {u['raw_value']} x{u['rows']}")
     print(f"Cleaned {len(df):,} responses -> {out}/  (run {manifest['run_id']})")
     print(f"  responses with a review flag (kept): {int((~df['in_sensitivity_sample']).sum())}  |  ambiguous rating cells unscored: {sum(meta['ambiguous_cells'].values())}")
-    for f in OUTPUT_FILES + ["run_manifest.json"]:
+    for f in BUNDLE:
         print(f"  {out / f}")
 
 
