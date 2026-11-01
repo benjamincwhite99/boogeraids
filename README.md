@@ -39,7 +39,7 @@ Outputs go to `output/`:
 - **Self-rated change is reported item by item**, with valid pairs only, and described as retrospective self-report, not measured learning.
 - **Small groups:** groups under 10 are pooled into "Other (…)", cells under 10 are suppressed with complementary suppression (nothing recoverable by subtraction), and groups of 10–29 are labeled "thin".
 - **Comments are never reworded.** The exact export text is in `*_original`, and response types are in `*_type`. The `*_redacted` columns replace listed names (any capitalization), "Mr./Ms./Dr. + name", emails and phone numbers. **This is a preliminary, automated pass, so read every excerpt before quoting or sharing it.**
-- **Invalid answers are flagged, never forced.** Unknown labels, counties and roles, and 0–10 answers that aren't whole numbers in range, are left blank, flagged `flag_unmapped_value`, and listed in the report.
+- **Invalid answers are flagged, never forced.** Unknown labels, counties and roles, and 0–10 answers that aren't whole numbers in range, are left blank, flagged `flag_unmapped_value`, and listed in the report. A role answer that mixes known and unknown selections (e.g. "Student;Volunteer") goes into its own "Includes unrecognized role" group, so it never counts as a single-role student.
 
 ## Confirming an ambiguous label
 

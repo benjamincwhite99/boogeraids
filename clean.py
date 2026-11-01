@@ -176,8 +176,12 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
         """True where the raw cell has something in it (not blank or whitespace-only)."""
         return r[col].map(lambda v: pd.notna(v) and str(v).strip() != "")
 
-    df["response_id"] = pd.to_numeric(r["response_id"], errors="coerce").astype("Int64")
-    unmapped["response_id"] = present("response_id") & df["response_id"].isna()
+    df["source_row"] = range(2, len(r) + 2)                         # spreadsheet row in the export (row 1 = headers); stable even if an ID is bad
+    df["response_id_original"] = r["response_id"]
+    rid = pd.to_numeric(r["response_id"], errors="coerce")
+    id_ok = rid.notna() & (rid % 1 == 0)                            # whole numbers only; e.g. 1.5 is flagged, not cast
+    df["response_id"] = rid.where(id_ok).astype("Int64")
+    unmapped["response_id"] = present("response_id") & ~id_ok
 
     # Timestamps & dates ---------------------------------------------------
     df["start_time"] = pd.to_datetime(r["start_time"], errors="coerce")
@@ -208,26 +212,39 @@ def clean(raw: pd.DataFrame, cfg: dict, log: ChangeLog) -> tuple[pd.DataFrame, d
     role_map, role_disp = cfg["role_map"], cfg["role_display"]
 
     def parse_roles(v):
+        """-> (recognized role keys, unrecognized selections as typed)."""
         if pd.isna(v):
-            return []
-        keys = []
+            return [], []
+        keys, unknown = [], []
         for part in str(v).split(";"):
             p = norm(part)
             if not p:
                 continue
             if p in role_map:
                 keys.append(role_map[p])
-        return sorted(set(keys))
+            else:
+                unknown.append(part.strip())
+        return sorted(set(keys)), unknown
 
-    roles = r["role_raw"].map(parse_roles)
+    parsed = r["role_raw"].map(parse_roles)
+    roles = parsed.map(lambda x: x[0])
+    unknown_roles = parsed.map(lambda x: x[1])
     for key in role_map.values():
         df[f"is_{key}"] = roles.map(lambda ks, k=key: k in ks)
-    df["role_count"] = roles.map(len)
-    df["role_group"] = roles.map(lambda ks: pd.NA if not ks else role_disp[ks[0]] if len(ks) == 1 else "Multiple roles")
-    df["roles_selected"] = roles.map(lambda ks: "; ".join(role_disp[k] for k in ks) if ks else pd.NA)
+    df["role_count"] = roles.map(len) + unknown_roles.map(len)
+
+    def group(x):
+        ks, unk = x
+        if unk:
+            return "Includes unrecognized role"    # kept apart so e.g. 'Student;Volunteer' isn't counted as a single-role student
+        return pd.NA if not ks else role_disp[ks[0]] if len(ks) == 1 else "Multiple roles"
+
+    df["role_group"] = parsed.map(group)
+    df["roles_selected"] = parsed.map(lambda x: "; ".join([role_disp[k] for k in x[0]] + [f"UNRECOGNIZED:{u}" for u in x[1]]) or pd.NA)
+    df["roles_unrecognized"] = unknown_roles.map(lambda u: "; ".join(u) or pd.NA)
     log.add_pairs("role_group", r["role_raw"], df["role_group"], "split on ';', drop empty parts, map labels (role_map)",
                   same=lambda raw_v, v: norm(raw_v) in role_map and role_disp[role_map[norm(raw_v)]] == v)
-    unmapped["role_group"] = r["role_raw"].map(lambda v: pd.notna(v) and any(norm(p) and norm(p) not in role_map for p in str(v).split(";")))
+    unmapped["role_group"] = unknown_roles.map(bool)
 
     # County ---------------------------------------------------------------
     aliases = cfg["county_aliases"]
@@ -816,7 +833,8 @@ def build_report(raw: pd.DataFrame, df: pd.DataFrame, meta: dict, cfg: dict, log
                  "Note": f"Promoters {ns['promoters']} / Passives {ns['passives']} / Detractors {ns['detractors']}"})
     lc = df["likely_call_0_10"].dropna()
     rows.append({"Measure": "Likely to call 988: % scoring 9-10", "Value": pct((lc >= 9).sum(), len(lc)), "Valid n": len(lc), "Missing": N - len(lc),
-                 "Note": f"Mean {lc.astype(float).mean():.2f}. Only asked in some sessions (§4b). Not representative."})
+                 "Note": (f"Mean {lc.astype(float).mean():.2f}. " if len(lc) else "") +
+                         "Answered by a subset of respondents; the reasons for the missing answers are unconfirmed (§4b). Not representative."})
     w(md_table(pd.DataFrame(rows)) + "\n")
     rc = df["recommend_0_10"].value_counts().sort_index()
     w("**Recommend score distribution:** " + ", ".join(f"{int(k)}: {v}" for k, v in rc.items()) +
@@ -922,13 +940,15 @@ def data_dictionary(df: pd.DataFrame) -> pd.DataFrame:
         "response_id": "Forms response ID (unchanged)", "start_time": "Survey start timestamp", "end_time": "Survey completion timestamp",
         "duration_sec": "end_time − start_time in seconds", "survey_date": "Date survey started", "survey_month": "YYYY-MM of survey start",
         "training_date": "Training date as entered by respondent", "days_survey_after_training": "survey_date − training_date (days)",
-        "language": "Language version of the form used (not necessarily native or training language)", "role_group": "Single role, or 'Multiple roles'", "roles_selected": "All roles selected",
+        "language": "Language version of the form used (not necessarily native or training language)", "role_group": "Single role, 'Multiple roles', or 'Includes unrecognized role' (any selection no rule covers)", "roles_selected": "All roles selected",
         "role_count": "Number of roles selected", "county": "Standardized county the training was affiliated with (not residence)", "county_note": "Extra detail typed in county field",
         "recommend_0_10": "Likelihood to recommend (0-10)", "recommend_category": "NPS category from recommend_0_10",
         "likely_call_0_10": "Likelihood to call 988 (0-10); mostly blank, see report",
         "sat_items_answered": "Satisfaction items with any answer, incl. ambiguous labels (0-3)", "sat_items_scored": "Satisfaction items with a 1-5 score (0-3)", "satisfaction_mean": "Mean of 3 satisfaction items (only if all 3 scored); used only for the scale-reversal flag",
         "session_id": "Approximate session: training date / county", "session_n": "Responses in this session_id",
         "duplicate_of_id": "response_id of the earlier identical response, if flagged",
+        "source_row": "Row number in the original export (row 1 = headers); identifies a response even if its ID is bad",
+        "response_id_original": "ID exactly as exported", "roles_unrecognized": "Role selections no rule covers, as typed",
         "recommend_0_10_original": "Recommend answer exactly as exported", "likely_call_0_10_original": "Likely-to-call answer exactly as exported",
         "session_likely_call_coverage": "Share of this session's responses that answered the likely-to-call question (0-1)",
         "session_satisfaction_coverage": "Share of this session's responses that answered any satisfaction item (0-1)", "review_flag_count": "Number of review flags set", "in_sensitivity_sample": "True if no review flag is set (used for the sensitivity check only)",

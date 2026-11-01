@@ -47,7 +47,8 @@ for key, words in KEYS.items():
     if len(hits) != 1:
         sys.exit(f"validator: could not identify raw column '{key}' (matches: {hits})")
     R[key] = hits[0]
-raw_ids = pd.to_numeric(raw[R["id"]], errors="coerce").astype("Int64")
+_rid = pd.to_numeric(raw[R["id"]], errors="coerce")
+raw_ids = _rid.where(_rid % 1 == 0).astype("Int64")      # non-whole IDs (e.g. 1.5) count as unusable, like in the output
 
 results = []
 names_file = HERE / "redaction_names.local.json"   # gitignored list of real names to redact
@@ -118,8 +119,15 @@ rl = raw[R["role"]].astype(str).str.lower()
 for key, needle in [("is_student", "student"), ("is_school_staff", "school staff"), ("is_caregiver_parent", "caregiver"),
                     ("is_other_community", "other (e.g")]:
     check(f"{key} matches raw role text", (rl.str.contains(needle, regex=False) == clean[key].astype(bool)).all())
-n_roles = rl.map(lambda s: len([p for p in s.split(";") if p.strip()]))
-check("role_group = 'Multiple roles' exactly when >1 role", ((n_roles > 1) == (clean["role_group"] == "Multiple roles")).all())
+KNOWN_ROLES = {"student", "school staff member", "caregiver/parent", "other (e.g., community member)"}
+parts = raw[R["role"]].map(lambda v: [] if pd.isna(v) else [" ".join(p.split()).lower() for p in str(v).split(";") if p.strip()])
+has_unknown = parts.map(lambda ps: any(p not in KNOWN_ROLES for p in ps))
+check("role_group = 'Multiple roles' exactly when >1 role and all recognized",
+      (((parts.map(len) > 1) & ~has_unknown) == (clean["role_group"] == "Multiple roles")).all())
+check("any unrecognized role selection -> 'Includes unrecognized role' and flagged",
+      ((clean["role_group"] == "Includes unrecognized role") == has_unknown).all() and clean.loc[has_unknown.values, "flag_unmapped_value"].astype(bool).all())
+check("role_group = 'Student' only for a single recognized 'Student' selection",
+      ((clean["role_group"] == "Student") == parts.map(lambda ps: ps == ["student"])).all())
 
 ck = raw[R["county"]].astype(str).str.replace("\xa0", " ").str.replace("’", "'").str.strip().str.lower()
 first_word = clean["county"].astype("string").str.replace("UNRECOGNIZED:", "", regex=False).str.lower().str.split().str[0]
@@ -181,25 +189,34 @@ blank_lc = int(clean["likely_call_0_10"].isna().sum())   # values themselves wer
 check("report: likely-to-call blank count", f"{blank_lc:,} of {len(raw):,} blank" in report)
 rec = pd.to_numeric(raw[R["recommend"]], errors="coerce")
 rec = rec.where(rec.between(0, 10) & (rec % 1 == 0)).dropna()
-nps = round(100 * ((rec >= 9).sum() - (rec <= 6).sum()) / len(rec))
-check("report: overall NPS", f"| Likely to recommend: NPS | {nps:+d} | {len(rec)} |" in report, f"expected {nps:+d} ({len(rec)})")
+nps_txt = "n/a" if len(rec) == 0 else f"{round(100 * ((rec >= 9).sum() - (rec <= 6).sum()) / len(rec)):+d}"
+check("report: overall NPS", f"| Likely to recommend: NPS | {nps_txt} | {len(rec)} |" in report, f"expected {nps_txt} ({len(rec)})")
+
+
+def pct_txt(num, n):
+    return "n/a" if n == 0 else f"{100 * num / n:.1f}%"
+
+
 for item, label in [("identify", "Identify mental health challenges and crises"), ("describe", "Describe 988 and how it works"),
                     ("when", "Know when to use 988")]:
     pre = raw[R[f"pre_{item}"]].map(score).astype(float)
     post = raw[R[f"post_{item}"]].map(score).astype(float)
     ok = pre.notna() & post.notna()
     pre, post = pre[ok], post[ok]
-    b, a2 = 100 * (pre >= 4).mean(), 100 * (post >= 4).mean()
-    want = f"| {label} | {int(ok.sum())} | {int((~ok).sum())} | {b:.1f}% | {a2:.1f}% | {a2 - b:+.1f} pts | {pre.mean():.2f} | {post.mean():.2f} | {(post - pre).mean():+.2f}"
+    if ok.sum() == 0:
+        want = f"| {label} | 0 | {len(raw)} |"
+    else:
+        b, a2 = 100 * (pre >= 4).mean(), 100 * (post >= 4).mean()
+        want = f"| {label} | {int(ok.sum())} | {int((~ok).sum())} | {b:.1f}% | {a2:.1f}% | {a2 - b:+.1f} pts | {pre.mean():.2f} | {post.mean():.2f} | {(post - pre).mean():+.2f}"
     check(f"report: all-responses knowledge row ({item})", want in report, want)
 for col, label in [("sat_engaged", "Presenter engaged participants"), ("sat_knowledge", "Presenter knew the subject matter"),
                    ("sat_organized", "Training was well organized")]:
     s = raw[R[col]].map(score).dropna()
-    want = f"| {label}: % agree (4-5) | {100 * (s >= 4).mean():.1f}% | {len(s)} | {len(raw) - len(s)} |"
+    want = f"| {label}: % agree (4-5) | {pct_txt((s >= 4).sum(), len(s))} | {len(s)} | {len(raw) - len(s)} |"
     check(f"report: satisfaction row ({col})", want in report, want)
 lcv = pd.to_numeric(raw[R["likely_call"]], errors="coerce")
 lcv = lcv.where(lcv.between(0, 10) & (lcv % 1 == 0)).dropna()
-want = f"| Likely to call 988: % scoring 9-10 | {100 * (lcv >= 9).mean():.1f}% | {len(lcv)} | {len(raw) - len(lcv)} |"
+want = f"| Likely to call 988: % scoring 9-10 | {pct_txt((lcv >= 9).sum(), len(lcv))} | {len(lcv)} | {len(raw) - len(lcv)} |"
 check("report: likely-to-call 9-10 row", want in report, want)
 nsd = int((raw[[R["post_identify"], R["post_describe"], R["post_when"]]].map(score) == 1).all(axis=1).sum())
 check("report: all-post-strongly-disagree count", f"{nsd} responses rate all three after-training" in report)

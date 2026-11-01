@@ -9,6 +9,7 @@ workbook never triggers most of them, which is why passing validate_clean.py on 
 Exits with status 1 if any test fails.
 """
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -71,7 +72,9 @@ CASES = [
     row(18, tdate=None),                                      # blank training date
     row(19, county="   "),                                    # whitespace-only county
     row(20, start="not a time"),                              # unreadable timestamp
-] + [row(i) for i in range(21, 41)]
+    row(21, role="Student;Volunteer"),                        # one recognized + one unrecognized role
+    row(22, id=1.5),                                          # non-whole ID
+] + [row(i) for i in range(23, 41)]
 
 results = []
 
@@ -134,6 +137,15 @@ def main():
         check("unreadable timestamp flagged; month blank, not 'NaT'",
               "start_time" in str(d.loc[20, "unmapped_fields"]) and pd.isna(d.loc[20, "survey_month"]))
         check("no 'NaT' text anywhere in output", not d.astype(str).isin(["NaT"]).any().any())
+        r21 = d[d["source_row"] == 22].iloc[0]                    # source_row = spreadsheet row (row 1 is headers)
+        check("partly unrecognized roles kept apart from single-role students",
+              r21["role_group"] == "Includes unrecognized role" and bool(r21["is_student"]) and r21["roles_unrecognized"] == "Volunteer"
+              and "UNRECOGNIZED:Volunteer" in r21["roles_selected"] and bool(r21["flag_unmapped_value"]))
+        r22 = d[d["source_row"] == 23].iloc[0]
+        check("non-whole ID: blank, original kept, flagged, row still identifiable",
+              pd.isna(r22.name) and str(r22["response_id_original"]) == "1.5" and "response_id" in str(r22["unmapped_fields"]))
+        check("report doesn't claim questions were or weren't asked",
+              not any(p in report for p in ["Only asked in", "not asked", "asked (≥80%)"]))
         check("blank likely-call stays blank and is not flagged", pd.isna(d.loc[15, "likely_call_0_10"]) and not d.loc[15, "flag_unmapped_value"])
         # Redaction
         check("lowercase listed name redacted", "alice" not in d.loc[6, "text_improve_redacted"].lower() and "[NAME]" in d.loc[6, "text_improve_redacted"])
@@ -176,6 +188,20 @@ def main():
             cols = ["post_identify", "sat_engaged", "recommend_0_10", "county", "role_group", "text_improve", "text_improve_type", "flag_unmapped_value"]
             same = d[cols].astype(str).equals(d3[cols].astype(str))
             check("CSV with reversed columns matches Excel result", same)
+
+        # Questions nobody answered: pipeline and validator must both cope with zero valid answers
+        for name, field in [("no recommend answers", "recommend"), ("no likely-call answers", "likely_call")]:
+            empty = pd.DataFrame([row(i, **{field: None}) for i in range(1, 31)], columns=HEADERS)
+            ex = tmp / f"empty_{field}.xlsx"
+            empty.to_excel(ex, index=False)
+            pe = run([str(ex), "--config", str(tmp / "cfg.json"), "--out", str(tmp / f"out_{field}")])
+            ve = subprocess.run([sys.executable, str(ROOT / "validate_clean.py"), str(ex), "--out", str(tmp / f"out_{field}"),
+                                 "--config", str(tmp / "cfg.json")], capture_output=True, text=True) if pe.returncode == 0 else None
+            check(f"{name}: pipeline and validator both pass", pe.returncode == 0 and ve is not None and ve.returncode == 0,
+                  (pe.stderr[-200:] if pe.returncode else "; ".join(l for l in ve.stdout.splitlines() if l.startswith("FAIL"))[:300] or ve.stderr[-300:]))
+            if pe.returncode == 0:
+                rep = (tmp / f"out_{field}" / "data_quality_report.md").read_text()
+                check(f"{name}: report shows n/a, not nan", not re.search(r"\bnan\b", rep, re.IGNORECASE), "")
 
         # Missing and repeated IDs: only true repeats are flagged
         ids = pd.DataFrame([row(1), row(1), row(2, id=None), row(3, id=None)], columns=HEADERS)
