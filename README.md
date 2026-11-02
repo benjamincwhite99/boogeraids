@@ -13,6 +13,10 @@ The survey export, case materials and all outputs are **not** in this repository
 
 ```bash
 pip install -r requirements.txt       # versions this was built and tested with (Python 3.9)
+python3 run_all.py                     # everything below in order: clean -> validate -> themes; stops at the first failure
+python3 run_all.py new_export.xlsx --tests   # a newer export, running the synthetic test suites first
+
+# or one step at a time:
 python3 clean.py                       # cleans BuildFest_EveryMind_Survey_Data_FULL.xlsx
 python3 clean.py new_export.xlsx       # any newer export (.xlsx or .csv); column order doesn't matter
 python3 validate_clean.py              # independent check of the output against the raw file (add --config if you used one)
