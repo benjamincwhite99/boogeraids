@@ -118,6 +118,8 @@ def any_match(pats, text) -> bool:
 
 def classify_intent(text: str, rules: dict) -> str:
     """question / no_change / suggestion / unclear. Only used for the 'improve' box."""
+    if any_match(rules.get("unclear", []), text):
+        return "unclear"
     if any_match(rules["question"], text) and not any_match(rules["question_not"], text):
         return "question"
     if any_match(rules["no_change"], text) and not any_match(rules["no_change_not"], text):
@@ -247,7 +249,7 @@ FIELD_NAMES = {"most_valuable": "most valuable thing learned", "improve": "how t
 
 
 def sample_paths(out: Path) -> list:
-    return sorted(out.glob(f"{SAMPLE_PREFIX}*.xlsx"))
+    return sorted([*out.glob(f"{SAMPLE_PREFIX}*.xlsx"), *out.glob(f"{SAMPLE_PREFIX}*.csv")])
 
 
 def draw_samples(codes: pd.DataFrame, reviewers: int, overlap: int) -> dict:
@@ -428,16 +430,32 @@ def read_samples(paths: list) -> pd.DataFrame | None:
         return None
     parts = []
     for path in paths:
-        s = pd.read_excel(path, sheet_name="Sample", dtype=str, keep_default_na=False)
+        if path.suffix.lower() == ".csv":
+            try:
+                s = pd.read_csv(path, dtype=str, keep_default_na=False, encoding="utf-8-sig")
+            except UnicodeDecodeError:
+                s = pd.read_csv(path, dtype=str, keep_default_na=False, encoding="cp1252")
+        else:
+            s = pd.read_excel(path, sheet_name="Sample", dtype=str, keep_default_na=False)
         missing = [c for c in SAMPLE_COLS if c not in s.columns]
         if missing:
             sys.exit(f"ERROR: {path.name} is missing columns {missing}. Restore them or draw new samples with --new-sample --force.")
         parts.append(s.assign(file=path.name, reviewer=s["sample_id"].str.split("-").str[0]))
     s = pd.concat(parts, ignore_index=True)
-    dup = s[s["sample_id"].duplicated(keep=False)]
-    if len(dup):
-        files = sorted(set(dup["file"]))
-        sys.exit(f"ERROR: {', '.join(files)} contain the same sample rows (a copy of one reviewer's file?). Keep one and remove the others.")
+    # Permit an unchanged blank assignment beside its returned CSV, never two reviews.
+    drop = []
+    source_cols = [c for c in SAMPLE_COLS if c not in ENTRY_COLS]
+    for sid, group in s[s["sample_id"].duplicated(keep=False)].groupby("sample_id"):
+        populated = group[ENTRY_COLS].apply(lambda c: c.str.strip().ne("")).any(axis=1)
+        matching = len(group[source_cols].drop_duplicates()) == 1
+        formats = {Path(f).suffix.lower() for f in group["file"]}
+        if len(group) == 2 and matching and populated.sum() <= 1 and formats == {".csv", ".xlsx"}:
+            keep = group.index[populated][0] if populated.any() else group.index[group.file.str.endswith(".csv")][0]
+            drop.extend(i for i in group.index if i != keep)
+        else:
+            files = sorted(set(group["file"]))
+            sys.exit(f"ERROR: {', '.join(files)} contain the same sample rows with duplicate or conflicting entries. Keep one authoritative review.")
+    s = s.drop(index=drop).reset_index(drop=True)
     return s
 
 
@@ -451,8 +469,10 @@ def score_sample(s: pd.DataFrame, codes: pd.DataFrame, spec: dict) -> dict:
     valid_ids = {f: set(labels(spec, f)) for f in FIELDS}
     by_key = {(r.field, str(r.source_row)): r for r in codes.itertuples(index=False)}
     warn, per_theme, intent_ok, intent_n, rows = [], {}, 0, 0, 0
+    theme_rows = 0
+    scored_reviewers = set()
     judged = {}                      # (field, source_row) -> [(reviewer, themes, intent)]
-    split = lambda v: [x.strip() for x in str(v).replace(",", ";").split(";") if x.strip()]
+    split = lambda v: [x.strip().strip('"').strip("'").strip() for x in str(v).replace(",", ";").split(";") if x.strip()]
     for r in s.itertuples(index=False):
         if str(r.reviewed).strip().lower() not in ("y", "yes", "x", "1"):
             if any(str(getattr(r, c)).strip() for c in ENTRY_COLS[1:4]):
@@ -466,34 +486,55 @@ def score_sample(s: pd.DataFrame, codes: pd.DataFrame, spec: dict) -> dict:
         # a person's 'wrong'/'missing' entries refer to the codes they saw, recorded in auto_themes.
         saw = set(split(r.auto_themes))
         wrong, missing = set(split(r.wrong_themes)), set(split(r.missing_themes))
-        bad = (wrong | missing) - valid_ids[r.field]
+        bad = (saw | wrong | missing) - valid_ids[r.field]
         if bad:
-            warn.append(f"sample {r.sample_id}: unknown theme id(s) {sorted(bad)}; ignored")
-        truth = ((saw - wrong) | missing) & valid_ids[r.field]
+            warn.append(f"sample {r.sample_id}: unknown theme id(s) {sorted(bad)}; row skipped, check original auto codes and reviewer entries")
+            continue
+        if wrong - saw or wrong & missing:
+            warn.append(f"sample {r.sample_id}: inconsistent wrong/missing theme entries; row skipped")
+            continue
+        truth = (saw - wrong) | missing
         now = set(split(cur.themes))
-        rows += 1
-        for t in valid_ids[r.field]:
-            st = per_theme.setdefault(t, {"tp": 0, "fp": 0, "fn": 0})
-            st["tp"] += t in now and t in truth
-            st["fp"] += t in now and t not in truth
-            st["fn"] += t not in now and t in truth
         want = ""
         if r.field == "improve":
             want = str(r.correct_intent).strip() or str(r.auto_intent).strip()
+            if want not in {"question", "suggestion", "no_change", "unclear"}:
+                warn.append(f"sample {r.sample_id}: unknown intent {want!r}; row skipped")
+                continue
             intent_n += 1
             intent_ok += cur.intent == want
-        judged.setdefault((r.field, str(r.source_row)), []).append((r.reviewer, truth, want))
+        elif str(r.correct_intent).strip():
+            warn.append(f"sample {r.sample_id}: correct_intent applies only to improve rows; intent entry ignored")
+        rows += 1
+        scored_reviewers.add(r.reviewer)
+        allowed = {t["id"]: t["applies_to"] for t in spec[r.field]["themes"]}
+        allowed[UNSPECIFIC_QUESTION[0]] = ["question"]
+        incompatible = {t for t in truth if r.field == "improve" and
+                        (want in {"no_change", "unclear"} or
+                         (allowed.get(t) and want not in allowed[t]))}
+        if incompatible:
+            warn.append(f"sample {r.sample_id}: themes {sorted(incompatible)} conflict with corrected intent {want}; intent scored, themes await reviewer clarification")
+        else:
+            theme_rows += 1
+            for t in valid_ids[r.field]:
+                st = per_theme.setdefault(t, {"tp": 0, "fp": 0, "fn": 0})
+                st["tp"] += t in now and t in truth
+                st["fp"] += t in now and t not in truth
+                st["fn"] += t not in now and t in truth
+        judged.setdefault((r.field, str(r.source_row)), []).append((r.reviewer, None if incompatible else truth, want))
     pairs = themes_same = intent_pairs = intent_same = 0
     for (field, _), js in judged.items():
         for i in range(len(js)):
             for j in range(i + 1, len(js)):
-                pairs += 1
-                themes_same += js[i][1] == js[j][1]
+                if js[i][1] is not None and js[j][1] is not None:
+                    pairs += 1
+                    themes_same += js[i][1] == js[j][1]
                 if field == "improve":
                     intent_pairs += 1
                     intent_same += js[i][2] == js[j][2]
     return {"rows": rows, "per_theme": per_theme, "intent_ok": intent_ok, "intent_n": intent_n, "warnings": warn,
-            "reviewers": sorted(set(s.loc[s["reviewed"].str.strip().ne(""), "reviewer"])),
+            "reviewers": sorted(scored_reviewers), "theme_rows": theme_rows,
+            "rows_total": len(s), "unique_comments": len(judged),
             "agreement": {"pairs": pairs, "themes_same": themes_same, "intent_pairs": intent_pairs, "intent_same": intent_same}}
 
 
@@ -551,6 +592,11 @@ def build_report(codes, summary, spec, manifest, d, samples, score, min_n) -> st
     if score is None or not score["rows"]:
         w("> ⚠ **Not yet validated.** No rows of the validation sample have been checked yet, so treat every figure "
           "below as provisional.\n")
+
+    else:
+        w(f"> **Provisional: partial review and calibration.** {score['rows']} of {len(samples)} sample entries scored "
+          f"({score['unique_comments']} distinct comments). These comments informed the rules; "
+          "agreement after tuning is not held-out accuracy. Resolve the warnings in section 5.\n")
 
     # 1. at a glance
     q = codes[(codes["field"] == "improve")]
@@ -623,6 +669,9 @@ def build_report(codes, summary, spec, manifest, d, samples, score, min_n) -> st
           "reviewer agreed with. **Recall**: of the themes the reviewer said apply, the share the rules found. "
           "A comment checked by several reviewers counts once per reviewer. "
           "Themes with fewer than 5 hand-coded examples aren't scored.\n")
+        w(f"Theme agreement uses {score['theme_rows']} entries; intent agreement uses {score['intent_n']} improve entries. "
+          "Invalid codes are excluded; conflicting intent/theme edits are scored for intent only. "
+          "Reviewer entries are preserved, including unresolved disagreements.\n")
         rows, tp, fp, fn = [], 0, 0, 0
         for field in FIELDS:
             for tid, lab in labels(spec, field).items():
@@ -744,7 +793,11 @@ def main(argv=None):
                "codebook": {"file": cb_path.name, "sha256": sha256(cb_path)},
                "code": {"themes.py": sha256(Path(__file__))},
                "python": platform.python_version(), "pandas": pd.__version__,
-               "validation": {"files": [p.name for p in paths], "rows_checked": score["rows"]},
+               "validation": {"files": [p.name for p in paths], "rows_checked": score["rows"],
+                              "rows_total": len(samples), "theme_rows": score["theme_rows"],
+                              "unique_comments": score["unique_comments"], "reviewers": score["reviewers"],
+                              "warnings": score["warnings"], "held_out": False,
+                              "source_sha256": {p.name: sha256(p) for p in paths}},
                "files": {f: {"sha256": sha256(staging / f)} for f in BUNDLE}}
         (staging / "themes_manifest.json").write_text(json.dumps(man, indent=2), encoding="utf-8")
         publish(staging, dest)

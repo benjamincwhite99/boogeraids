@@ -44,7 +44,7 @@
      "\\bany sorts? of emotional",
      "\\bany mental",
      "\\bmental issue",
-     "\\bno solo\\b",
+     "\\bno solo (?:es )?para (?:el )?(?:suicidio|crisis)\\b",
      "\\bsola\\b",
      "\\bcompania\\b",
      "\\bhablar con alguien\\b",
@@ -64,7 +64,8 @@
      "\\bwhat people need\\b",
      "\\bnobody needs to wait\\b",
      "\\bemotional situation\\b",
-     "\\bhelps you with emotions\\b"
+     "\\bhelps you with emotions\\b",
+     "\\bfeel(?:ing)? (?:bad|alone|lonely)\\b"
     ],
     "exclude": [
      "\\bconsent for everything\\b"
@@ -200,7 +201,7 @@
      "\\bexist",
      "\\bnever heard\\b",
      "\\bhad not heard\\b",
-     "\\bdidn'?t know (about|that|what|exactly|it)\\b",
+     "\\bdidn'?t know (about|what|exactly|it)\\b",
      "\\breally didn'?t know about\\b",
      "\\bonly knew of 911\\b",
      "\\bwas even a resource\\b",
@@ -220,7 +221,8 @@
      "\\bran the 988\\b",
      "\\bsuicide (contact team|and crisis line)\\b",
      "\\bhay un (recurso|numero)\\b",
-     "\\bsaber del 988\\b"
+     "\\bsaber del 988\\b",
+     "\\bdidn'?t know that (?:988 |it )?(?:exist|was (?:a |even a )?(?:resource|service|number))"
     ],
     "exclude": []
    },
@@ -595,7 +597,8 @@
     "\\bi wonder\\b",
     "\\bi (still )?(would like|want) to learn\\b",
     "^(about|more about|other ways|more of what|just a little more about|(learn|love to learn) (more )?about|more about)\\b",
-    "^more (about|on|of what)\\b"
+    "^more (about|on|of what)\\b",
+    "^more about 988[.!]*$"
    ],
    "question_not": [
     "\\bi don'?t have (any )?questions\\b",
@@ -603,10 +606,11 @@
     "^how (we|you) can improve\\b",
     "^how can we improve\\b",
     "\\bimprove (this|the) training\\b",
-    "^(by|maybe|more|have|give|allow|make|adding|include|provide|bring|incorporate|use|get|keep|show|tell)\\b",
+    "^(by|maybe|more(?! about 988[.!]*$)|have|give|allow|make|adding|include|provide|bring|incorporate|use|get|keep|show|tell)\\b",
     "\\bwould be (great|helpful|useful|awesome|nice|even better)\\b",
     "\\bwe could\\b",
-    "^would be great\\b"
+    "^would be great\\b",
+    "^i (?:would like|want) to learn more about (?:identifying\\b|being able to help\\b|when (?:you are|someone is) concerned (?:for|about)\\b)"
    ],
    "no_change": [
     "\\bnothing\\b",
@@ -668,15 +672,19 @@
     "\\bdone well\\b",
     "\\bwonderful\\b",
     "\\b(nothing|anything) to improve\\b",
-    "\\bno (more|further) questions\\b"
+    "\\bno (more|further) questions\\b",
+    "\\bme encanto\\b"
    ],
    "no_change_not": [
-    "\\b(maybe|wish|but|however|except|could be|would be|perhaps|probably need|only thing|although)\\b",
+    "\\b(maybe|wish|but(?!\\s+i\\s+(?:appreciate|thank)\\b)|however|except|could be|would be|perhaps|probably need|only thing|although)\\b",
     "\\bmore\\b(?!\\s*(i\\b|$|questions))",
     "\\bless\\b",
     "\\blonger\\b",
     "\\bshorter\\b",
     "\\bimprove (this|the) training (by|in)\\b"
+   ],
+   "unclear": [
+    "^(?:please )?call 988[.!]*$"
    ]
   },
   "themes": [
@@ -848,7 +856,7 @@
      "\\bawareness\\b",
      "\\beveryone hears\\b",
      "\\bra training\\b",
-     "\\bbring (in )?(some )?more\\b",
+     "\\bbring (in )?(some )?more (?:people|students|families|parents)\\b",
      "\\bcome and participate\\b",
      "\\bmake more people participate\\b",
      "\\bthat more people participate\\b",
@@ -911,7 +919,8 @@
      "\\bexplaining it better\\b",
      "\\bmore concretas\\b",
      "\\bconsequences\\b",
-     "\\bother symptoms\\b"
+     "\\bother symptoms\\b",
+     "^i (?:would like|want) to learn more about (?:identifying\\b|being able to help\\b|when (?:you are|someone is) concerned (?:for|about)\\b)"
     ],
     "exclude": [
      "\\binformative\\b"

@@ -75,12 +75,17 @@ python3 tests/test_dashboard.py        # synthetic tests
 Writes `output/dashboard.html`, a one-page visual report that opens in any browser, offline, and works at phone width. It leads with the headline result and a short list of findings, then covers self-rated change by role, NPS by role, what students and everyone else found most valuable, what the "improve" box was used for, the questions people still had, suggested improvements, responses by month, and the caveats to read before using any number. All group tables are at the end.
 
 - **Written from the data.** Every headline and finding is generated from this run's numbers, and a finding only appears when the data supports it, so a new export needs no editing.
+- **Next steps.** Each finding points to an action with a suggested owner, a rough effort and a measure that shows whether it worked. Owners are roles for EveryMind to assign.
+- **Margins of error.** NPS and self-rated changes show a 95% margin of error (adjusted-Wald for NPS; each person's own before/after change for the gains). They cover random variation only, not who chose to answer or recall bias.
+- **Session scorecard.** Each session (training date × county) with at least 10 ratings, its NPS and margin, and the NPS its own mix of students and others would predict. Sessions outside their margin are marked above or below expected. Smaller sessions are pooled, and if the pool would be under 10 the smallest shown session joins it. It's a prompt to look into a session, not a trainer rating.
+- **Explore.** Filters for county, role and "leave out flagged responses", working offline in the page. Counties are pooled as in `group_tables.csv`. A selection is only published if it has at least 10 responses and, within each filter, the unpublished selections add up to 0 or at least 10, so no small group can be found by subtracting one view from a broader one. Menu options that can't be shown are marked "(too few)".
+- **Since the last run.** Each run records its aggregate figures in `output/dashboard_history.json` (one entry per export and settings, last 20). The next run with a different export or config shows the changes at the top of the page.
 - **Hover or tab to any mark** for exact figures. Every chart has a "Show the numbers" table.
 - **Design:** warm-paper editorial style (adapted from the Oura entry in [awesome-design-md](https://github.com/VoltAgent/awesome-design-md)). The two chart colors pass a colorblind-safety check against the background. Fonts are Newsreader and Hanken Grotesk (SIL Open Font License, in `assets/fonts/`), embedded in the page.
 
 - **Aggregates only.** No comment text, IDs or row-level data go into the page. Group figures come from `group_tables.csv` and `theme_summary.csv` as published, so their suppression carries over.
 - **It refuses to run on mismatched files.** The cleaned files must match `run_manifest.json`, and the themes must have been built from that exact bundle.
-- **It's labeled provisional** until the theme validation samples have been hand-checked.
+- **Themes remain provisional during calibration.** The dashboard shows scored review entries against total assigned entries. Invalid theme IDs are excluded with warnings; intent edits with incompatible retained themes count for intent only until the reviewer resolves them. The manifest fingerprints the exact review files. Agreement after tuning on the same comments is not held-out accuracy.
 
 ## Rules the pipeline follows
 
@@ -109,3 +114,5 @@ If a new label, county or role shows up, the script prints a warning. It leaves 
 ## Who runs it and when
 
 Program staff can run it after each batch of trainings (e.g. monthly) with Python installed: run `clean.py`, then `validate_clean.py`. Only use the outputs if validation passes. Review §2/§2a of the report for new issues, then use `clean_responses.csv` for analysis or the dashboard.
+
+Returned Sample tabs may also be supplied as output/theme_validation_sample_B.csv (UTF-8 or Windows-1252). A CSV and its unchanged blank assignment workbook are combined by sample ID only when their source fields agree. Competing completed reviews or changed source fields stop the run. Original review files are never rewritten.

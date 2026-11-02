@@ -14,3 +14,6 @@ redaction_names.local.json
 __pycache__/
 *.pyc
 .DS_Store
+
+# Private project handoff
+HANDOFF.md

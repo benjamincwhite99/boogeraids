@@ -62,6 +62,64 @@ def main():
     i, t = code("most_valuable", "That it’s not just for suicidal people.")
     check("curly apostrophe matches", "mv_beyond_suicide" in t, t)
 
+    # Validation-driven intent boundaries, using synthetic wording.
+    cases = [
+        ("Please call 988!", "unclear"),
+        ("I would like to learn more about identifying warning signs", "suggestion"),
+        ("I want to learn more about being able to help a neighbor", "suggestion"),
+        ("I would like to learn more about how the service started", "question"),
+        ("Nothing, but I appreciate the visit", "no_change"),
+        ("Nothing, but I appreciate the visit; more games please", "suggestion"),
+    ]
+    for text, want in cases:
+        check(f"review regression: {text}", code("improve", text)[0] == want)
+    check("when to call does not imply around-the-clock availability",
+          "mv_always_available" not in code("most_valuable", "Learning when to call")[1])
+
+    # Malformed annotations must not silently become false positives.
+    frame = pd.DataFrame([dict(source_row=1, field="improve", text_redacted="A synthetic comment",
+                               themes="im_content", intent="suggestion")])
+    sample = pd.DataFrame([dict(sample_id="A-001", source_row="1", field="improve",
+                                comment="A synthetic comment", auto_intent="suggestion",
+                                auto_themes="im_content", reviewed="y", correct_intent="",
+                                wrong_themes="", missing_themes="", notes="", reviewer="A")])
+    bad = sample.copy()
+    bad.loc[0, "auto_themes"] = "im_typo"
+    scored = themes.score_sample(bad, frame, spec)
+    check("unknown original auto-code is excluded and warned", scored["rows"] == 0 and
+          "unknown theme" in scored["warnings"][0] and not scored["reviewers"])
+    bad = sample.copy()
+    bad.loc[0, "correct_intent"] = "no_change"
+    scored = themes.score_sample(bad, frame, spec)
+    check("intent correction with incompatible themes is scored for intent only",
+          scored["rows"] == 1 and scored["intent_n"] == 1 and scored["theme_rows"] == 0 and
+          not scored["per_theme"] and "conflict" in scored["warnings"][0])
+    bad = sample.copy()
+    bad.loc[0, "correct_intent"] = "typo"
+    check("invalid intent is excluded", themes.score_sample(bad, frame, spec)["rows"] == 0)
+    bad = sample.copy()
+    bad.loc[0, "wrong_themes"] = "im_logistics"
+    check("removing a code that was not displayed is flagged",
+          themes.score_sample(bad, frame, spec)["rows"] == 0)
+
+    check("learning a specific feature does not imply discovering 988 exists",
+          "mv_what_988_is" not in code("most_valuable", "I didn't know that you could text 988")[1])
+    check("Spanish age eligibility is not beyond-suicide evidence",
+          "mv_beyond_suicide" not in code("most_valuable", "No solo es para los estudiantes, tambien para adultos")[1])
+    check("calling when lonely is beyond-suicide evidence",
+          "mv_beyond_suicide" in code("most_valuable", "You can call when feeling lonely")[1])
+    check("more activities does not imply more people",
+          "im_reach_more_people" not in code("improve", "Bring more activities")[1])
+    check("more people remains outreach",
+          "im_reach_more_people" in code("improve", "Bring in more people")[1])
+    check("Spanish praise is no change", code("improve", "Me encanto la presentacion")[0] == "no_change")
+    check("standalone information request is a question",
+          code("improve", "More about 988") == ("question", ["q_unspecific"]))
+    quoted = sample.copy()
+    quoted.loc[0, "wrong_themes"] = '"im_content"'
+    check("quoted correction codes are parsed without changing source entries",
+          themes.score_sample(quoted, frame, spec)["per_theme"]["im_content"]["fp"] == 1)
+
     # --- codebook errors
     tmp = Path(tempfile.mkdtemp(prefix="themes_test_"))
     try:
@@ -124,6 +182,22 @@ def main():
               [x.name for x in paths])
         from openpyxl import load_workbook
         sm = themes.read_samples(paths)
+        returned = sm[sm.reviewer.eq("B")][themes.SAMPLE_COLS].copy()
+        returned.loc[returned.index[0], "reviewed"] = "y"
+        csv_path = out / "theme_validation_sample_B.csv"
+        returned.to_csv(csv_path, index=False)
+        imported = themes.read_samples(themes.sample_paths(out))
+        check("returned CSV replaces matching blank assignments without double counting",
+              len(imported) == len(sm) and imported.reviewed.eq("y").sum() == 1)
+        returned.loc[returned.index[0], "comment"] = "changed source text"
+        returned.to_csv(csv_path, index=False)
+        try:
+            themes.read_samples(themes.sample_paths(out))
+            refused = False
+        except SystemExit:
+            refused = True
+        check("CSV with conflicting source text is refused", refused)
+        csv_path.unlink()
         check("instructions are the first sheet", load_workbook(paths[0]).sheetnames == ["How to fill in", "Sample", "Codebook"])
         keys = sm.assign(k=sm["field"] + ":" + sm["source_row"]).groupby("reviewer")["k"].apply(set)
         shared = keys["A"] & keys["B"] & keys["C"]

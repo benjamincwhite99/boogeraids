@@ -5,6 +5,7 @@
 
 Exits with status 1 if any test fails.
 """
+import json
 import re
 import shutil
 import subprocess
@@ -13,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 from test_edge_cases import row, write_xlsx  # noqa: E402
 
@@ -65,7 +67,44 @@ def main():
         check("self-contained: no external URLs", not re.search(r"(src|href)=[\"']?(https?:)?//", page))
         check("provisional banner while no rows are hand-checked", "Comment themes are provisional" in txt)
         check("no half-written temp file left", not (out / ".dashboard.html.tmp").exists())
-        check("every chart has a table view", page.count("Show the numbers") == 7, str(page.count("Show the numbers")))
+        check("every chart has a table view", page.count("Show the numbers") == 9, str(page.count("Show the numbers")))
+        # 10 promoters, 20 passives: margin = 1.96 * sqrt((1/3 - 1/9) / 29) * 100 = 17.2
+        check("NPS shown with its 95% margin of error", "NPS +33 ±17" in txt, txt[:700])
+        check("action plan: each step has an owner, effort and measure",
+              "What to do next" in txt and txt.count("How to tell it worked") == txt.count("Effort") >= 1
+              and "knowledge check" in txt, txt[txt.find("What to do next"):][:600])
+        check("first run: no 'since the last run' strip", "Since the last run" not in txt)
+        check("run history recorded", (out / "dashboard_history.json").exists())
+
+        import dashboard
+        data = dashboard.load(out)
+        cube = json.loads(re.search(r'id="xdata">(.*?)</script>', page, re.S).group(1))
+        whole = cube["views"]["*|*|*"]
+        check("explorer: unfiltered view matches the headline", whole["n"] == 30 and whole["nps"][0] == 33.3, str(whole))
+
+        # Explorer suppression: county B has 5 responses, so county A (25) can't be shown either (30 − 25 = 5).
+        d = data["clean"].copy()
+        d["county"] = ["A"] * 25 + ["B"] * 5
+        d["role_group"] = ["Student"] * 12 + ["School staff"] * 18
+        views = dashboard.explore_cube(d, 10)["views"]
+        check("explorer: small view and its complement are both withheld",
+              "B|*|*" not in views and "A|*|*" not in views and "*|*|*" in views, sorted(views))
+        ok = all(v["n"] >= 10 for v in views.values())
+        check("explorer: every published view has at least 10 responses", ok)
+        check("explorer: roles shown when their complements are large enough",
+              "*|Student|*" in views and "*|School staff|*" in views, sorted(views))
+
+        # Sessions: S3 has 3 responses, so the smallest shown session (S2) is pooled with it.
+        d["session_id"] = ["2026-04-28 / A"] * 15 + ["2026-04-29 / A"] * 12 + ["2026-04-30 / A"] * 3
+        s = dashboard.sessions(d, 10, None)
+        check("sessions: complementary pooling keeps the pool at 10 or more",
+              [r["label"] for r in s["rows"]] == ["28 Apr 2026 · A"] and s["small_n"] == 15 and s["n_small"] == 2,
+              str([(r["label"], r["n"]) for r in s["rows"]]) + f" pool {s['small_n']}")
+        data["themes_manifest"]["validation"].update(rows_checked=2, rows_total=12)
+        partial = text_of(dashboard.build(data, 10))
+        check("partial review stays provisional with correct entry denominator",
+              "2 of 12 review entries scored" in partial and
+              "remain provisional" in partial and "not held-out accuracy" in partial)
 
         # Changed cleaned file: refuse.
         csv = out / "clean_responses.csv"
@@ -80,6 +119,22 @@ def main():
         p = run("dashboard.py", "--out", out)
         check("themes from an older bundle -> refuses", c.returncode == 0 and p.returncode != 0 and "Re-run themes.py" in p.stderr,
               p.stderr[-300:])
+        check("run history survives a re-clean", (out / "dashboard_history.json").exists())
+
+        # A newer export with 6 more responses: the page compares itself with the previous run.
+        write_xlsx(rows + [row(i, recommend=10) for i in range(31, 37)], tmp / "export2.xlsx")
+        for script, args in [("clean.py", [tmp / "export2.xlsx"]), ("validate_clean.py", [tmp / "export2.xlsx"]),
+                             ("themes.py", []), ("dashboard.py", [])]:
+            c = run(script, *args, "--out", out)
+        page2 = text_of(page_path.read_text(encoding="utf-8"))
+        check("newer export: 'since the last run' strip with the changes",
+              c.returncode == 0 and "Since the last run" in page2 and "30 → 36" in page2 and "+33 → +44" in page2,
+              (c.stderr + page2[:1200])[-1200:])
+        c = run("dashboard.py", "--out", out)
+        page3 = text_of(page_path.read_text(encoding="utf-8"))
+        check("re-running on the same export still compares with the earlier export",
+              "Since the last run" in page3 and "30 → 36" in page3
+              and len(json.loads((out / "dashboard_history.json").read_text())) == 2, page3[:900])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
