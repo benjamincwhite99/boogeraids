@@ -13,7 +13,7 @@ The survey export, case materials and all outputs are **not** in this repository
 
 ```bash
 pip install -r requirements.txt       # versions this was built and tested with (Python 3.9)
-python3 run_all.py                     # everything below in order: clean -> validate -> themes; stops at the first failure
+python3 run_all.py                     # everything below in order: clean -> validate -> themes -> dashboard; stops at the first failure
 python3 run_all.py new_export.xlsx --tests   # a newer export, running the synthetic test suites first
 
 # or one step at a time:
@@ -64,6 +64,23 @@ python3 tests/test_themes.py           # synthetic tests for the theme rules
 - **It refuses to run on a cleaned file that doesn't match its `run_manifest.json`**, so themes always describe a complete, checked bundle.
 - **Keyword rules are a first pass, so check them by hand.** The first run creates one file per reviewer: `output/theme_validation_sample_A.xlsx`, `_B`, `_C` (100 random comments per question each, fixed seed). 10 comments per question are in every file, to measure how far reviewers agree; the rest don't repeat, so three reviewers check 560 different comments. Each file opens on step-by-step instructions with worked examples. Reviewers mark each row `reviewed = y` and note any wrong or missing themes. Put the returned files back in `output/` and re-run `themes.py`: §5 of the report shows precision and recall per theme and reviewer agreement. Re-runs never overwrite entries (`--new-sample --force` is the only way to replace them; add `--reviewers N` or `--overlap N` to change the split).
 - **Changing a rule:** edit the patterns in `theme_codebook.json` and re-run. A bad pattern stops the run and names the theme.
+
+## Dashboard
+
+```bash
+python3 dashboard.py                   # after themes.py (run_all.py does this for you)
+python3 tests/test_dashboard.py        # synthetic tests
+```
+
+Writes `output/dashboard.html`, a one-page visual report that opens in any browser, offline, and works at phone width. It leads with the headline result and a short list of findings, then covers self-rated change by role, NPS by role, what students and everyone else found most valuable, what the "improve" box was used for, the questions people still had, suggested improvements, responses by month, and the caveats to read before using any number. All group tables are at the end.
+
+- **Written from the data.** Every headline and finding is generated from this run's numbers, and a finding only appears when the data supports it, so a new export needs no editing.
+- **Hover or tab to any mark** for exact figures. Every chart has a "Show the numbers" table.
+- **Design:** warm-paper editorial style (adapted from the Oura entry in [awesome-design-md](https://github.com/VoltAgent/awesome-design-md)). The two chart colors pass a colorblind-safety check against the background. Fonts are Newsreader and Hanken Grotesk (SIL Open Font License, in `assets/fonts/`), embedded in the page.
+
+- **Aggregates only.** No comment text, IDs or row-level data go into the page. Group figures come from `group_tables.csv` and `theme_summary.csv` as published, so their suppression carries over.
+- **It refuses to run on mismatched files.** The cleaned files must match `run_manifest.json`, and the themes must have been built from that exact bundle.
+- **It's labeled provisional** until the theme validation samples have been hand-checked.
 
 ## Rules the pipeline follows
 

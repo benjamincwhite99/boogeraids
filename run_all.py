@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the whole pipeline in one command: clean -> validate -> themes.
+"""Run the whole pipeline in one command: clean -> validate -> themes -> dashboard.
 
 Usage
 -----
@@ -10,7 +10,7 @@ Usage
 
 Stops at the first step that fails and exits with that step's status. If validation fails, the cleaned
 bundle in --out has already been published but must not be used until the problem is fixed and the run
-repeated; themes are not regenerated from it.
+repeated; themes and the dashboard are not regenerated from it.
 """
 import argparse
 import subprocess
@@ -39,16 +39,19 @@ def main(argv=None):
     ap.add_argument("input", nargs="?", default=str(DEFAULT_INPUT))
     ap.add_argument("--config", default=str(HERE / "cleaning_config.json"))
     ap.add_argument("--out", default=str(HERE / "output"))
-    ap.add_argument("--tests", action="store_true", help="run tests/test_edge_cases.py and tests/test_themes.py first")
+    ap.add_argument("--tests", action="store_true", help="run the synthetic test suites in tests/ first")
     a = ap.parse_args(argv)
 
     if a.tests:
         step("Cleaning tests", [HERE / "tests" / "test_edge_cases.py"])
         step("Theme tests", [HERE / "tests" / "test_themes.py"])
+        step("Dashboard tests", [HERE / "tests" / "test_dashboard.py"])
     step("Clean", [HERE / "clean.py", a.input, "--config", a.config, "--out", a.out])
     step("Validate", [HERE / "validate_clean.py", a.input, "--config", a.config, "--out", a.out])
     step("Themes", [HERE / "themes.py", "--config", a.config, "--out", a.out])
-    print(f"\nAll steps passed. Reports: {Path(a.out) / 'data_quality_report.md'} and {Path(a.out) / 'themes' / 'themes_report.md'}")
+    step("Dashboard", [HERE / "dashboard.py", "--config", a.config, "--out", a.out])
+    print(f"\nAll steps passed. Open {Path(a.out) / 'dashboard.html'} in a browser.\n"
+          f"Reports: {Path(a.out) / 'data_quality_report.md'} and {Path(a.out) / 'themes' / 'themes_report.md'}")
 
 
 if __name__ == "__main__":

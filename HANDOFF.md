@@ -9,7 +9,7 @@ Last updated 2026-11-02. Start a new session with: "Read HANDOFF.md and continue
 
 | Deliverable | Status |
 |---|---|
-| Technical artifact (must run, handle new data, include run instructions) | Pipeline done (below), including the one-command `run_all.py`. A visual dashboard is still to do. |
+| Technical artifact (must run, handle new data, include run instructions) | Pipeline done (below), including the one-command `run_all.py` and `output/dashboard.html`. |
 | Demo video, 2 minutes or less | Not started |
 | Process memo, 1–2 pages | Not started |
 | AI Process Appendix, 1 page | Not started. Error log below. |
@@ -40,7 +40,8 @@ Last updated 2026-11-02. Start a new session with: "Read HANDOFF.md and continue
 | `tests/test_edge_cases.py` | 90/90 synthetic edge-case tests for the cleaning. |
 | `themes.py` + `theme_codebook.json` | Keyword/regex coding of the two comment questions. Writes `output/themes/` (comment_codes.csv, theme_summary.csv, themes_report.md, themes_manifest.json). |
 | `tests/test_themes.py` | 51/51 theme tests. |
-| `run_all.py` | Runs clean → validate → themes (optionally the tests first) and stops at the first failure. |
+| `run_all.py` | Runs clean → validate → themes → dashboard (optionally the tests first) and stops at the first failure. |
+| `dashboard.py` + `tests/test_dashboard.py` | Builds `output/dashboard.html`: an editorial one-page report (Oura-style design from awesome-design-md, fonts embedded from `assets/fonts/`), with findings written from the data. Aggregates only; refuses mismatched bundles. 17/17 tests. |
 | `README.md` | Run instructions and the rules the pipeline follows. |
 | `output/theme_validation_sample_{A,B,C}.xlsx` | One hand-check file per teammate. Each has 200 comments (100 per question). 10 per question are shared by all three, to measure agreement, so 560 comments are distinct. Each file opens on the instructions. |
 
@@ -109,5 +110,5 @@ Before handing the validation files out, the old `output/theme_validation_sample
    - draft 3–4 recommendations, each with an owner, a metric and a cost
    - draft the memo
    - draft the AI appendix
-4. **Claude:** make a simple visual dashboard for the demo video. (`run_all.py` is done.)
+4. Done: `run_all.py` and the dashboard. Possible polish for the video: a session/county view and a time trend.
 5. **Fri–Sat:** deck (.pptx) and video. **Sat night:** anonymized repo link, a test run from a fresh clone, and final file naming.
