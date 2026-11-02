@@ -17,6 +17,7 @@ python3 clean.py                       # cleans BuildFest_EveryMind_Survey_Data_
 python3 clean.py new_export.xlsx       # any newer export (.xlsx or .csv); column order doesn't matter
 python3 validate_clean.py              # independent check of the output against the raw file (add --config if you used one)
 python3 tests/test_edge_cases.py       # synthetic edge cases a future export might contain (no real data needed)
+python3 themes.py                      # comment themes (see below)
 ```
 
 **Reading the cleaned CSV:** use `pd.read_csv("output/clean_responses.csv", keep_default_na=False, na_values=[""])`.
@@ -37,6 +38,28 @@ Outputs go to `output/`:
 **Open `clean_responses.xlsx` in Excel, not the CSV.** The workbook stores all survey text as plain text, so a comment such as `=1+1` never becomes a formula. Characters an Excel file can't hold (e.g. a line break pasted from Word) appear as `�` there. The CSVs keep the exact original text for analysis in Python or R, but Excel may treat a CSV cell starting with `=` as a formula. The report (issue 13) counts any such comments.
 
 **Inputs:** `.xlsx` or `.csv`. CSVs can be UTF-8 or Windows-1252, which is Excel's default "CSV" on Windows. The report records which one was used. Old `.xls` files need to be re-saved as `.xlsx`.
+
+## Comment themes
+
+```bash
+python3 themes.py                      # after clean.py + validate_clean.py
+python3 tests/test_themes.py           # synthetic tests for the theme rules
+```
+
+`themes.py` codes both open-ended questions with the keyword rules in `theme_codebook.json` and writes `output/themes/`:
+
+| File | What it is |
+|---|---|
+| `comment_codes.csv` | One row per substantive comment: intent, themes, role group, county, session, redacted text. |
+| `theme_summary.csv` | Every count in the report (long format), with denominators and suppression status. |
+| `themes_report.md` | Theme tables by students vs everyone else, where the questions came from, example excerpts, uncoded comments, validation results. |
+| `themes_manifest.json` | Which cleaned file, codebook and code produced it, plus a SHA-256 of every file. |
+
+- **A comment can have several themes**, so columns don't add to 100%. Denominators are substantive comments (question topics use question comments).
+- **The "improve" box gets an intent first** (question, no change, suggestion, unclear). In some sessions most people used it to ask questions instead of suggesting changes, so questions are reported separately.
+- **It refuses to run on a cleaned file that doesn't match its `run_manifest.json`**, so themes always describe a complete, checked bundle.
+- **Keyword rules are a first pass, so check them by hand.** The first run creates one file per reviewer: `output/theme_validation_sample_A.xlsx`, `_B`, `_C` (100 random comments per question each, fixed seed). 10 comments per question are in every file, to measure how far reviewers agree; the rest don't repeat, so three reviewers check 560 different comments. Each file opens on step-by-step instructions with worked examples. Reviewers mark each row `reviewed = y` and note any wrong or missing themes. Put the returned files back in `output/` and re-run `themes.py`: §5 of the report shows precision and recall per theme and reviewer agreement. Re-runs never overwrite entries (`--new-sample --force` is the only way to replace them; add `--reviewers N` or `--overlap N` to change the split).
+- **Changing a rule:** edit the patterns in `theme_codebook.json` and re-run. A bad pattern stops the run and names the theme.
 
 ## Rules the pipeline follows
 
