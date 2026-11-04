@@ -944,7 +944,7 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
           f'<ul>{details}</ul><p>Staff action register (separate from calculated flags)</p><ul>{reviews or "<li>No staff decisions recorded.</li>"}</ul></details></div></div>')
     versions = sorted(set('/'.join(r[k] for k in ('form_version','curriculum_version','faq_version','scenario_version')) for r in logs['sessions']))
     plan = (f'<section class="plan" id="priorities"><div class="wrap"><div class="sec-head">'
-            '<h2>Three intervention buckets, <em>with explicit triggers</em></h2>'
+            '<h2>3 actionable recommendations, <em>based on data</em></h2>'
             '<p class="sub">Proposed pilot thresholds, not rules validated by the historical survey. Call tracing here means a staff-verified teaching explanation of the call journey, privacy and location handling. '
             'No real caller records are collected. Questions and low NPS alone do not trigger venue changes.</p>'
             f'<p>Measurement coverage: {len(logs["sessions"])} logged events; {len(logs["assessments"])} assessment summaries. '
