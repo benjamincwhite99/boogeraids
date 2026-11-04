@@ -45,6 +45,7 @@ def main(argv=None):
     if a.tests:
         step("Cleaning tests", [HERE / "tests" / "test_edge_cases.py"])
         step("Theme tests", [HERE / "tests" / "test_themes.py"])
+        step("Intervention tests", [HERE / "tests" / "test_interventions.py"])
         step("Dashboard tests", [HERE / "tests" / "test_dashboard.py"])
     step("Clean", [HERE / "clean.py", a.input, "--config", a.config, "--out", a.out])
     step("Validate", [HERE / "validate_clean.py", a.input, "--config", a.config, "--out", a.out])

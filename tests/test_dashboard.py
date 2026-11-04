@@ -61,7 +61,7 @@ def main():
         check("headline: describe change computed from pairs (+100 points)",
               "Describe 988 and how it works: +100 points" in txt and "0% agreed before the training (recalled) and 100% after" in txt, txt[:900])
         check("headline: NPS (+33)", "NPS +33" in txt, txt[:600])
-        check("students vs everyone else hidden when a group is under the minimum size", "rate the training far lower" not in txt)
+        check("students vs everyone else hidden when a group is under the minimum size", "Recommendation gap:" not in txt)
         check("fonts embedded in the page", page.count("data:font/woff2;base64,") == 3)
         check("no comment text in the page", SECRET.lower() not in page.lower())
         check("self-contained: no external URLs", not re.search(r"(src|href)=[\"']?(https?:)?//", page))
@@ -71,8 +71,8 @@ def main():
         # 10 promoters, 20 passives: margin = 1.96 * sqrt((1/3 - 1/9) / 29) * 100 = 17.2
         check("NPS shown with its 95% margin of error", "NPS +33 ±17" in txt, txt[:700])
         check("action plan: each step has an owner, effort and measure",
-              "What to do next" in txt and txt.count("How to tell it worked") == txt.count("Effort") >= 1
-              and "knowledge check" in txt, txt[txt.find("What to do next"):][:600])
+              "What to do next" in txt and txt.count("Measures and operational detail") == txt.count("Trigger") == 3
+              and "correct-answer" in txt, txt[txt.find("What to do next"):][:600])
         check("first run: no 'since the last run' strip", "Since the last run" not in txt)
         check("run history recorded", (out / "dashboard_history.json").exists())
 
@@ -106,7 +106,23 @@ def main():
               "2 of 12 review entries scored" in partial and
               "remain provisional" in partial and "not held-out accuracy" in partial)
 
-        # Changed cleaned file: refuse.
+        # Audience gaps can reverse on future exports; the copy must follow the data.
+        rev = dict(data)
+        rev["clean"] = data["clean"].copy()
+        rev["clean"]["role_group"] = ["Student"] * 15 + ["School staff"] * 15
+        rev["clean"]["recommend_0_10"] = [10] * 15 + [0] * 15
+        revised = text_of(dashboard.build(rev, 10))
+        check("reversed audience gap: describes other respondents as lower",
+              "Other respondents give lower recommendation scores" in revised)
+        check("session benchmark: explicit exploratory limitations",
+              "not a validated prediction" in revised and "benchmark uncertainty" in revised
+              and "audience predicts" not in revised)
+        fs, acts = dashboard.findings(dashboard.headline(rev["clean"], 10), rev["themes"], {})
+        check("priorities remain bounded with actionable new measures",
+              len(fs) <= 3 and len(acts) <= 3 and
+              all("measure" in a for a in acts.values()) and
+              "correct-answer" in acts["adaptation"]["measure"])
+
         csv = out / "clean_responses.csv"
         original = csv.read_bytes()
         csv.write_bytes(original + b"\n")

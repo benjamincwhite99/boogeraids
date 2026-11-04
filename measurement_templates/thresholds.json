@@ -1,0 +1,9 @@
+{
+  "version": "pilot-v1",
+  "correct_threshold": 0.8,
+  "minimum_answered": 10,
+  "window": 3,
+  "repeats": 2,
+  "lost_fraction": 0.1,
+  "maximum_omission_fraction": null
+}

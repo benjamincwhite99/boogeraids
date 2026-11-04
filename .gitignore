@@ -17,3 +17,8 @@ __pycache__/
 
 # Private project handoff
 HANDOFF.md
+
+# Header-only input templates contain no partner records
+!measurement_templates/sessions.csv
+!measurement_templates/assessments.csv
+!measurement_templates/actions.csv

@@ -20,6 +20,7 @@ were built from this exact cleaned bundle, so the page always describes one comp
 from __future__ import annotations
 
 import argparse
+import interventions
 import base64
 import html
 import itertools
@@ -175,8 +176,8 @@ def sessions(d: pd.DataFrame, min_n: int, split) -> dict:
     """One row per training session (training date × county) with at least min_n responses and ratings.
 
     Smaller sessions are pooled. If the pool would hold 1–(min_n−1) responses, the smallest shown session joins it,
-    so no group under min_n can be worked out by subtracting from the whole-sample figures.
-    Expected NPS = the session's student share × the students' NPS + the rest × everyone else's NPS.
+    to reduce simple subtraction disclosure; cross-table combinations can still narrow groups.
+    Descriptive benchmark NPS = the session's student share × the students' NPS + the rest × everyone else's NPS.
     """
     shown, small = [], []
     for sid, g in d.groupby("session_id"):
@@ -196,7 +197,7 @@ def sessions(d: pd.DataFrame, min_n: int, split) -> dict:
     rows = [row(session_label(sid), g) for sid, g in shown]
     rows.sort(key=lambda r: r["nps"] - r["exp"] if r["exp"] == r["exp"] else r["nps"])
     pool = pd.concat([g for _, g in small]) if small else None
-    pooled = (row(f"{len(small)} smaller sessions, pooled", pool)
+    pooled = (row(f"{len(small)} smaller date/county groups, pooled", pool)
               if pool is not None and pool["recommend_0_10"].notna().sum() >= min_n else None)
     if pooled:
         pooled["status"] = ""
@@ -431,11 +432,11 @@ def session_chart(s: dict, split) -> str:
     body, trows = [], []
     for r in s["rows"] + ([s["pooled"]] if s["pooled"] else []):
         v, m, x = r["nps"], r["moe"], r["exp"]
-        pill = {"below": ' <span class="flag warn">below expected</span>',
-                "above": ' <span class="flag good">above expected</span>'}.get(r["status"], "")
+        pill = {"below": ' <span class="flag warn">below benchmark</span>',
+                "above": ' <span class="flag good">above benchmark</span>'}.get(r["status"], "")
         w = r["when"]
         t = (f"{r['label']}: NPS {signed(v)}{margin_text(m)} from {r['nps_n']:,} ratings; {r['student']:.0f}% students"
-             + (f"; expected for this audience {signed(x)}" if x == x else "")
+             + (f"; descriptive audience benchmark {signed(x)}" if x == x else "")
              + (f"; {w['after']:.0f}% know when to use 988 after" if w["n"] else ""))
         pooled = r is s["pooled"]
         body.append(f'<div class="row{" total" if pooled else ""}"><div class="lab">{e(r["label"])}{pill}</div>'
@@ -444,12 +445,12 @@ def session_chart(s: dict, split) -> str:
                     + f'<i class="dot {"c-clay" if r["status"] == "below" else "c-stone"}" style="left:{nps_pos(v):.2f}%"></i></div>'
                     f'<div class="val"><b>{signed(v)}</b> <span class="moe">{pm(m)}</span></div></div>')
         trows.append([e(r["label"]), f"{r['n']:,}", pct(r["student"]), signed(v), pm(m), signed(x) if x == x else "—",
-                      pct(w["after"]) if w["n"] else "—", {"below": "below expected", "above": "above expected"}.get(r["status"], "")])
-    keys = [("Session NPS", "c-stone"), ("Below expected", "c-clay"), ("95% margin of error", "whisk")]
+                      pct(w["after"]) if w["n"] else "—", {"below": "below benchmark", "above": "above benchmark"}.get(r["status"], "")])
+    keys = [("Date/county group NPS", "c-stone"), ("Below benchmark", "c-clay"), ("95% margin of error", "whisk")]
     if split:
-        keys.append(("Expected for its mix of students and others", "tick"))
+        keys.append(("Descriptive audience benchmark", "tick"))
     return (legend(keys) + f'<div class="panel">{"".join(body)}{axis(NPS_TICKS, -100, 100)}</div>'
-            + table_view(["Session", "Responses", "Students", "NPS", "Margin (95%)", "Expected", "Know when to use 988 (after)", ""], trows))
+            + table_view(["Date/county group", "Responses", "Students", "NPS", "Margin (95%)", "Benchmark", "Know when to use 988 (after)", ""], trows))
 
 
 def explore_html(cube: dict, flagged: int) -> str:
@@ -621,6 +622,10 @@ CSS = """
 --sans:'Hanken Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif}
 *{box-sizing:border-box}
 html{background:var(--canvas)}
+section{scroll-margin-top:20px}
+.section-nav{display:flex;flex-wrap:wrap;gap:12px 24px;padding-top:12px;padding-bottom:12px;border-block:1px solid var(--hair);font-size:15px}
+.section-nav a{color:var(--ink);text-underline-offset:4px}
+a:focus-visible,summary:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--blue);outline-offset:4px}
 body{margin:0;background:var(--canvas);color:var(--ink);font:400 17px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
 .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
 .topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding-top:22px;padding-bottom:22px;
@@ -792,7 +797,7 @@ if(xd){
   const key=['county','role'].map(k=>$('f-'+k).value).concat($('f-flag').checked?'kept':'*').join('|');
   const v=X.views[key],out=$('xout'),tb=$('xtbody');
   if(!v){out.innerHTML='<p class="none-msg">Not shown for this selection: it has too few responses, or showing it would let someone work out a group of fewer than 10 people. Try a broader selection.</p>';tb.innerHTML='';return}
-  let h='<div class="tiles"><div><b>'+v.n.toLocaleString()+'</b><span>responses · '+v.s+' session'+(v.s==1?'':'s')+'</span></div>';
+  let h='<div class="tiles"><div><b>'+v.n.toLocaleString()+'</b><span>responses · '+v.s+' date/county group'+(v.s==1?'':'s')+'</span></div>';
   h+=v.nps?'<div><b>NPS '+sg(v.nps[0])+'</b><span>'+(v.nps[1]!==null?'±'+Math.round(v.nps[1])+' · ':'')+v.nps[2].toLocaleString()+' ratings</span></div>':'<div><b>—</b><span>too few ratings for NPS</span></div>';
   h+='</div><div class="legend"><span><i class="key ring"></i>Before (recalled)</span><span><i class="key c-gold"></i>After the training</span></div><div class="panel">';
   let rows='';
@@ -821,18 +826,13 @@ if(xd){
 
 
 def section(eyebrow: str, title: str, sub: str, content: str, note: str = "", band: bool = False) -> str:
-    return (f'<section{" class=band" if band else ""}><div class="wrap"><div class="sec-head"><p class="eyebrow">{e(eyebrow)}</p>'
+    return (f'<section id="{e(eyebrow.lower().replace(" ", "-"))}"{" class=band" if band else ""}><div class="wrap"><div class="sec-head"><p class="eyebrow">{e(eyebrow)}</p>'
             f'<h2>{title}</h2>{f"<p class=sub>{e(sub)}</p>" if sub else ""}</div>'
             f'<div class="card">{content}</div>{f"<p class=note>{e(note)}</p>" if note else ""}</div></section>')
 
 
 def findings(h: dict, themes: pd.DataFrame, sess: dict) -> tuple:
-    """Short, data-written findings, each with the next step it points to.
-
-    A finding (and its action) is included only when the data supports it. Owners are suggested roles for
-    EveryMind to reassign; effort is a rough size, not a costed budget.
-    Returns (findings, actions): findings are (title HTML, text, action ids); actions are keyed by id, in order of first use.
-    """
+    """Up to three supported findings and three proposed pilots for staff review."""
     out, acts = [], {}
 
     def act(aid, short_do, do, owner, effort, measure):
@@ -840,82 +840,69 @@ def findings(h: dict, themes: pd.DataFrame, sess: dict) -> tuple:
         return aid
 
     best = max(h["items"], key=lambda i: i["gain"])
+    activity = act("activity", "Test a short interactive activity",
+                   "Pilot a five-minute scenario and a staff-approved call demonstration, replacing lecture time where feasible",
+                   "Curriculum lead", "8–12 preparation hours plus 1 hour to brief facilitators",
+                   "Use the same knowledge check in comparable sessions with and without the activity. Report correct answers, valid counts and missing answers by item. Track delivery time; small nonrandom differences remain exploratory.")
     out.append((f"{best['label']}: <em>{signed(best['gain'])} points</em>",
                 f"{pct(best['before'])} agreed before the training (recalled) and {pct(best['after'])} after "
-                f"(margin ±{best['moe']:.0f}). The largest self-rated gain of the three questions.",
-                [act("measure", "Add a knowledge check to the survey", "Add a three-question knowledge check to the survey, so the main result is measured rather than recalled",
-                     "Evaluation lead", "Low: a survey edit",
-                     f"Share answering the check correctly, reported next to the {pct(best['after'])} self-rating")]))
+                f"(margin ±{best['moe']:.0f}). These are self-rated changes, not independently measured learning or behavior.", [activity]))
     split = h["nps_split"]
     if split and abs(split["s"] - split["o"]) >= 20:
-        s, o = split["s"], split["o"]
-        who, lo, hi = ("Students", s, o) if s < o else ("Everyone else", o, s)
-        gap_m = (split["sm"] ** 2 + split["om"] ** 2) ** 0.5
-        ids = [act("student", "Pilot a student version of the session", "Pilot a student version of the session: shorter, more interactive, with set time for questions",
-                   "Training team", "Medium: redesign one session, run it in a few schools",
-                   f"Students' NPS in pilot sessions against today's {signed(s)} (±{split['sm']:.0f}), and against the "
-                   "‘expected’ marks in the session chart")]
-        if h["fives"] >= 0.05 * h["nps_n"] and h["fives_student_pct"] >= 80:
-            ids.append(act("midpoint", "Clarify the 0–10 recommend scale", "Label the ends and middle of the 0–10 recommend scale, or add a ‘not sure’ option",
-                           "Evaluation lead", "Low: a survey edit",
-                           f"Share choosing exactly 5 (now {h['fives']} of {h['nps_n']:,})"))
-        out.append((f"{who} rate the training far lower: NPS <em>{signed(lo)}</em> vs {signed(hi)}",
-                    f"From {split['sn']:,} students and {split['on']:,} other respondents. The gap of {abs(s - o):.0f} points "
-                    f"is far outside its ±{gap_m:.0f} margin. {h['fives']} people chose exactly 5, "
-                    f"{pct(h['fives_student_pct'])} of them students.", ids))
-    below = [r for r in sess["rows"] if r["status"] == "below"]
-    if below:
-        out.append((f"<em>{len(below)} of {len(sess['rows'])}</em> sessions scored below what their audience predicts",
-                    "Students rate the training lower, so each session is compared with the NPS its own mix of students "
-                    f"and others would predict. These fell short by more than the margin of error: "
-                    f"{', '.join(r['label'] for r in below[:3])}{' and others' if len(below) > 3 else ''}.",
-                    [act("sessions", "Debrief the below-expected sessions", "Debrief the below-expected sessions with their trainers: format, timing, room and group size. "
-                         "A prompt for review, not a performance rating",
-                         "Training team", "Low: a short debrief per session",
-                         "Number of sessions below expected each quarter, from this page")]))
-    rows = theme_rows(themes, "most_valuable", "mv_")
-    gaps = [(num(r["by"][OTHERS]["pct"]) - num(r["by"][STUDENTS]["pct"]), r) for r in rows
-            if usable(r["by"].get(STUDENTS)) and usable(r["by"].get(OTHERS))]
-    if gaps:
-        g_hi, r_hi = max(gaps, key=lambda x: x[0])
-        g_lo, r_lo = min(gaps, key=lambda x: x[0])
-        tailor = act("tailor", "Tailor the emphasis by audience", f"Tailor the emphasis by audience: lead with “{short(r_lo['label']).lower()}” for students "
-                     f"and “{short(r_hi['label']).lower()}” for adults",
-                     "Curriculum lead", "Low: reorder existing slides",
-                     "Each theme's share of ‘most valuable’ comments in each audience, from this page")
-        if g_hi >= 5:
-            out.append((f"Non-students valued learning “{e(short(r_hi['label']))}” most",
-                        f"{pct(num(r_hi['by'][OTHERS]['pct']))} of other respondents' “most valuable” comments, "
-                        f"against {pct(num(r_hi['by'][STUDENTS]['pct']))} of students'.", [tailor]))
-        if g_lo <= -5:
-            out.append((f"Students took away “{e(short(r_lo['label']))}”",
-                        f"{pct(num(r_lo['by'][STUDENTS]['pct']))} of students' “most valuable” comments, "
-                        f"against {pct(num(r_lo['by'][OTHERS]['pct']))} of everyone else's.", [tailor]))
+        out.append((f"Recommendation gap: students <em>{signed(split['s'])}</em>, others {signed(split['o'])} NPS",
+                    f"From {split['sn']:,} student ratings and {split['on']:,} other ratings. This gap does not establish weaker learning or explain its cause. "
+                    "Test how participants understand the recommendation scale; midpoint confusion remains a hypothesis.", [activity]))
     q = themes[(themes["field"] == "improve") & (themes["id"] == "question")].set_index("group")
-    topics = theme_rows(themes, "improve", "q_")
-    if STUDENTS in q.index and num(q.loc[STUDENTS, "pct"]) >= 25:
-        top = [short(t["label"]).lower() for t in topics[:2]]
-        topic = f" The most common topic: {top[0]}." if top else ""
-        out.append((f"<em>{pct(num(q.loc[STUDENTS, 'pct']))}</em> of students' “improve” comments were questions",
-                    f"{q.loc[STUDENTS, 'n']} student questions, a ready-made list of what students still want to know.{topic}",
-                    [act("faq", "Answer the common questions in the session", "Answer the most common questions in the session and on a take-home card"
-                         + (f". Top topics: {'; '.join(top)}" if top else ""),
-                         "Training team", "Low: one card, five minutes of session time",
-                         "Share of students' ‘improve’ comments that are questions"),
-                     act("qbox", "Add a ‘questions’ box to the survey", "Add a separate ‘What questions do you still have?’ box to the survey",
-                         "Evaluation lead", "Low: a survey edit",
-                         "Share of ‘improve’ comments that are actual suggestions")]))
-    sugg = theme_rows(themes, "improve", "im_")
-    if sugg:
-        c = sugg[0]["by"]["All"]
-        lab = short(sugg[0]["label"]).lower()
-        out.append((f"Most requested change: {e(lab)}",
-                    f"{pct(num(c['pct']))} of all “improve” comments ({c['n']} of {c['denominator']}).",
-                    [act("top_request", f"Act on the top request: {lab}", f"Act on the most requested change: {lab}", "Program lead", "Medium: depends on the change",
-                         f"Share of ‘improve’ comments asking for it (now {pct(num(c['pct']))})")]))
+    if "All" in q.index and num(q.loc["All", "n"]) > 0:
+        qr = q.loc["All"]
+        survey = act("survey", "Separate questions from improvement feedback",
+                     "Use separate question and improvement fields, record the form version, and standardize facilitator instructions",
+                     "Evaluation lead", "4–6 setup hours",
+                     "Test whether participants can explain what each field and the recommendation scale asks. Track form-version coverage, completion and missing answers. Preserve compatible definitions when comparing runs; fewer questions alone is not success.")
+        faq = act("faq", "Provide a staff-verified FAQ",
+                  "Have service staff verify answers to common questions, then pilot a short FAQ in student sessions",
+                  "Training lead and service reviewer", "8–12 preparation and review hours",
+                  "Use three staff-approved comprehension items before and after the FAQ. Report correct-answer counts and missing responses for each item. Keep inviting questions; their frequency is not a learning measure.")
+        out.append((f"<em>{pct(num(qr['pct']))}</em> of improvement comments are questions",
+                    f"{qr['n']} of {qr['denominator']} substantive comments ask questions. Possible prompt or form differences remain unconfirmed. "
+                    "Separate feedback from questions so both can guide staff decisions.", [survey, faq]))
     for i, (_, _, ids) in enumerate(out, 1):
         for aid in ids:
             acts[aid]["why"].append(i)
+    # Survey clarity comes first in the pilot sequence, when question comments support it.
+    acts = {k: acts[k] for k in ("survey", "faq", "activity") if k in acts}
+    mapping = {'survey':'delivery','faq':'delivery','activity':'adaptation'}
+    out = [(title, body, list(dict.fromkeys(mapping[x] for x in ids))) for title, body, ids in out]
+    acts = {
+      'delivery': dict(short='Immediate delivery tweaks', do='Immediate delivery tweaks', owner='Training lead, facilitator and service reviewer',
+        effort='Correct before next delivery; restore essential access immediately',
+        measure='Check comprehension, delivery completeness and understanding of the two survey prompts.',
+        evidence='Call experience: 65/263 questions; privacy/police: 24/263. These are broad topics, not tracing-specific counts.',
+        change='Add a 60–90 second staff-verified call walkthrough and explanation of privacy/location handling. Separate questions from feedback. Check AV and keep an accessible backup.',
+        trigger='Any confirmed factual error or missing core explanation: correct it. Any inaccessible essential content: restore access or provide an equivalent.', why=[]),
+      'adaptation': dict(short='Targeted content adaptations', do='Targeted content adaptations', owner='Curriculum lead with student input and service review',
+        effort='Version scenarios and compare the same learning objective',
+        measure='Compare correct-answer shares, omissions and delivery time. Proposed retention criterion: +10 percentage points with no material increase in missingness or planned time; exploratory, not proof.',
+        evidence='Interaction: 38/568 improvement comments; examples: 33/568. The recommendation gap does not establish the cause.',
+        change='Rewrite generic prompts around fictional exam pressure, falling behind, or concern for a friend at school. Keep factual guidance and scoring difficulty consistent.',
+        trigger='Proposed: below 80% correct on the same item in at least 2 of the latest 3 comparable sessions, each with at least 10 answered checks. Review omissions before deciding.', why=[]),
+      'structural': dict(short='Structural / logistical interventions', do='Structural / logistical interventions', owner='Program coordinator and venue contact',
+        effort='Match the response to the documented cause; costs depend on the remedy',
+        measure='Track lost-time percentage, recurring problems, essential content delivered and access.',
+        evidence='Broad logistics: 16/568 comments; pacing: 18/568. Historical data does not measure venue interruptions.',
+        change='Use a quieter room, microphone, protected teaching slot or registration before teaching when documented incidents support the change. Meet access requirements without waiting for recurrence.',
+        trigger='Proposed: at least 10% of planned teaching time lost → debrief before next booking. Same problem in 2 of the latest 3 sessions at the same venue/configuration → document a structural change.', why=[])}
+    def count(theme_id):
+        rows = themes[(themes['field']=='improve') & (themes['id']==theme_id) & (themes['group']=='All')]
+        if rows.empty: return 'unavailable'
+        r = rows.iloc[0]
+        if r['status'] != 'shown': return 'suppressed / unavailable'
+        return f"{r['n']}/{r['denominator']}"
+    acts['delivery']['evidence'] = f"Call experience: {count('q_call_experience')} questions; privacy/police: {count('q_privacy_police')}. These broad topics are not tracing-specific counts."
+    acts['adaptation']['evidence'] = f"Interaction: {count('im_more_interactive')} improvement comments; examples: {count('im_examples_stories')}. The recommendation gap does not establish the cause."
+    acts['structural']['evidence'] = f"Broad logistics: {count('im_logistics')} comments; pacing: {count('im_time_pacing')}. Historical data does not measure venue interruptions."
+    for i, (_, _, ids) in enumerate(out, 1):
+        for aid in ids: acts[aid]['why'].append(i)
     return out, acts
 
 
@@ -955,7 +942,7 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
   <h1>After the training, <em>{pct(when["after"])}</em> say they know when to use 988.</h1>
   <p class="lead">Up from {pct(when["before"])} who recall knowing before. Self-rated agreement on all three questions, before and after:</p>
   <div class="badges">{badges}</div>
-  <div class="facts"><span><b>{h["n"]:,}</b> responses</span><span><b>{h["sessions"]}</b> training session{"" if h["sessions"] == 1 else "s"}</span>
+  <div class="facts"><span><b>{h["n"]:,}</b> responses</span><span><b>{h["sessions"]}</b> date/county group{"" if h["sessions"] == 1 else "s"}</span>
     <span><b>{pct(h["student_pct"])}</b> students</span>{nps_fact}</div>
   <div class="pill"><i></i>{e(status)}</div>
   {since_html(previous, snapshot(data, h))}
@@ -969,18 +956,34 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
         + "".join(f'<a href="#act-{aid}">{chr(64 + num_of[aid])}. {e(acts[aid]["short"])}</a>' for aid in ids)
         + "</div></div>"
         for i, (t, p, ids) in enumerate(fs, 1))
-    key = (f'<section><div class="wrap"><div class="sec-head"><p class="eyebrow">At a glance</p>'
+    key = (f'<section id="findings"><div class="wrap"><div class="sec-head"><p class="eyebrow">At a glance</p>'
            f'<h2>What the survey says, in {len(fs)} findings</h2></div><div class="findings">{finding_cards}</div></div></section>')
-    act_rows = "".join(
-        f'<div class="act" id="act-{aid}"><div class="al">{chr(64 + num_of[aid])}</div><div><h3>{e(a["do"])}</h3>'
-        f'<dl><div><dt>Owner</dt><dd>{e(a["owner"])}</dd></div><div><dt>Effort</dt><dd>{e(a["effort"])}</dd></div>'
-        f'<div><dt>How to tell it worked</dt><dd>{e(a["measure"])}</dd></div>'
-        f'<div><dt>From finding</dt><dd>{", ".join(f"{w:02d}" for w in a["why"])}</dd></div></dl></div></div>'
-        for aid, a in acts.items())
-    plan = (f'<section class="plan"><div class="wrap"><div class="sec-head"><p class="eyebrow">What to do next</p>'
-            f'<h2>{len(acts)} next step{"" if len(acts) == 1 else "s"}, <em>each with a way to check it worked</em></h2>'
-            '<p class="sub">Written from the findings above. Owners are suggested roles; EveryMind assigns the people. '
-            'Most measures can be read from this page after the next export; the survey edits add the rest.</p></div>'
+    logs, policy = data.get('interventions', ({k: [] for k in interventions.FIELDS}, interventions.DEFAULT))
+    states = interventions.evaluate(logs, policy, min_n)
+    acts['adaptation']['trigger'] = (f"Proposed: below {policy['correct_threshold']:.0%} correct on the same item in at least {policy['repeats']} of the latest {policy['window']} comparable sessions, each with at least {max(min_n, policy['minimum_answered'])} answered checks. Review omissions before deciding.")
+    acts['structural']['trigger'] = (f"Proposed: at least {policy['lost_fraction']:.0%} of planned teaching time lost → debrief before next booking. Same problem in {policy['repeats']} of the latest {policy['window']} sessions at the same venue/configuration → document a structural change.")
+
+    act_rows = ""
+    for aid, a in acts.items():
+        state = states[aid]
+        details = ''.join('<li>'+e(v)+'</li>' for v in state['details'])
+        human = [r for r in logs['actions'] if r['bucket']==aid]
+        reviews = ''.join('<li>'+e(r['action_id']+': '+(r['decision'] or 'proposed action')+' — '+r['owner_role']+'; '+r['action_taken'])+'</li>' for r in human)
+        act_rows += (f'<div class="act" id="act-{aid}"><div class="al">{chr(64 + num_of[aid])}</div><div><h3>{e(a["do"])}</h3>'
+          f'<p><strong>Status: {e(state["status"])}</strong></p><p>{e(a["change"])}</p>'
+          f'<dl><div><dt>Evidence</dt><dd>{e(a["evidence"])}</dd></div><div><dt>Trigger</dt><dd>{e(a["trigger"])}</dd></div>'
+          f'<div><dt>Owner</dt><dd>{e(a["owner"])}</dd></div></dl>'
+          f'<details><summary>Measures and operational detail</summary><p>{e(a["measure"])}</p><p>{e(a["effort"])}</p>'
+          f'<ul>{details}</ul><p>Staff action register (separate from calculated flags)</p><ul>{reviews or "<li>No staff decisions recorded.</li>"}</ul></details></div></div>')
+    versions = sorted(set('/'.join(r[k] for k in ('form_version','curriculum_version','faq_version','scenario_version')) for r in logs['sessions']))
+    plan = (f'<section class="plan" id="priorities"><div class="wrap"><div class="sec-head"><p class="eyebrow">What to do next</p>'
+            '<h2>Three intervention buckets, <em>with explicit triggers</em></h2>'
+            '<p class="sub">Proposed pilot thresholds, not rules validated by the historical survey. Call tracing here means a staff-verified teaching explanation of the call journey, privacy and location handling. '
+            'No real caller records are collected. Questions and low NPS alone do not trigger venue changes.</p>'
+            f'<p>Measurement coverage: {len(logs["sessions"])} logged events; {len(logs["assessments"])} assessment summaries. '
+            f'Policy: {e(policy["version"])}. Form/curriculum/FAQ/scenario versions: {e(", ".join(versions) or "awaiting measurement")}.</p>'
+            '<p>Missingness tolerance must be agreed before retention decisions. Small learner groups are suppressed. '
+            'Calculated flags do not close actions; staff record their review separately.</p></div>'
             f'<div class="acts">{act_rows}</div></div></section>')
 
     all_up = all(num(r["value"]) > 0 for it in ITEMS for r in role_rows(groups, f"agree_change_{it[0]}") if r["status"] == "shown")
@@ -989,53 +992,48 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
     months = h["months"]
     split = h["nps_split"]
     nps_title = ("Would they recommend it?" if not split or abs(split["s"] - split["o"]) < 20 else
-                 "Students and everyone else <em>see it differently</em>")
+                 "Students give <em>lower recommendation scores</em>" if split["s"] < split["o"] else "Other respondents give <em>lower recommendation scores</em>")
     below = sum(r["status"] == "below" for r in sess["rows"])
-    sess_title = (f"<em>{below}</em> session{'' if below == 1 else 's'} scored below what {'its' if below == 1 else 'their'} audience predicts"
-                  if below else "No session scored clearly below what its audience predicts")
-    sess_sub = ("Each session (training date × county) with at least "
-                f"{min_n} ratings: its NPS with a 95% margin of error"
-                + (f", and a tick for the NPS its own mix of students and others would predict from the whole-sample scores "
-                   f"(students {signed(split['s'])}, everyone else {signed(split['o'])}). Sorted from furthest below that tick."
-                   if split else ".")
-                + (f" {sess['n_small']} smaller sessions ({sess['small_n']:,} responses) are pooled." if sess["n_small"] else ""))
+    sess_title = "Exploratory session comparisons"
+    sess_sub = (f"Training date × county is a proxy for sessions, not a verified event identifier. Groups with at least {min_n} ratings show NPS and a 95% margin of error. "
+                + ("The tick is a descriptive benchmark: the group's share of student ratings times the whole-sample student NPS, plus the remaining share times the other respondents' NPS. "
+                   "It uses this same dataset and is not a validated prediction. " if split else "")
+                + (f"{sess['n_small']} smaller groups ({sess['small_n']:,} responses) are pooled." if sess["n_small"] else ""))
     wf = h["without_flagged"]
 
     body = "".join([
-        section("01 · Confidence", "Every group reports more confidence after the training" if all_up else "Self-rated confidence, before and after",
+        section("Confidence", "Every group reports more confidence after the training" if all_up else "Self-rated confidence, before and after",
                 "Share answering agree or strongly agree (4–5). Both ratings were collected after the session; "
                 "the ‘before’ is recalled, so this is self-report, not measured learning. "
                 "± is the 95% margin of error on the change.",
                 dumbbells(groups, h, d)),
-        section("02 · Recommendation", nps_title,
+        section("Recommendation", nps_title,
                 "Net Promoter Score: the share scoring 9–10 minus the share scoring 0–6, from −100 to +100. "
                 "The thin line on each bar is its 95% margin of error.",
                 nps_bars(groups, h, d),
                 f"{h['fives']} respondents chose exactly 5 and {pct(h['fives_student_pct'])} of them were students "
                 f"(students are {pct(h['student_pct'])} of respondents). Some may have used the midpoint as ‘no opinion’; "
-                "the data can't confirm this.", band=True),
-        section("03 · Sessions", sess_title, sess_sub, session_chart(sess, split),
-                "Session scores also depend on the room, the time of day and who attended. With this many sessions, one or "
-                "two can cross the line by chance. Use this to choose which sessions to look into, not to rate trainers."),
-        section("04 · Explore", "Check any figure <em>for your own audience</em>",
+                "the data can't confirm this. NPS measures recommendation, not learning.", band=True),
+        section("Explore", "Check any figure <em>for your own audience</em>",
                 "Filter by county and role, or leave out the responses flagged for review. "
-                f"A selection with fewer than {min_n} responses is not shown, and neither is one that would let someone "
-                f"work out a group under {min_n} by comparing it with a broader one.",
+                f"Groups under {min_n} are suppressed with complementary suppression within filters. Combining different tables can still narrow groups; use this file internally.",
                 explore_html(explore_cube(d, min_n), h["flagged"])),
-        section("05 · What stuck", "What people found <em>most valuable</em> depends on who they are",
+        section("What stuck", "What people found <em>most valuable</em> depends on who they are",
                 f"Themes in answers to ‘the most valuable thing you learned’. Sorted from themes non-students mention more "
                 f"(top) to themes students mention more (bottom). A comment can have several themes.",
                 theme_dots(theme_rows(themes, "most_valuable", "mv_"))),
-        section("06 · The feedback box",
+        section("Feedback",
                 "For students, the feedback box <em>became a question box</em>" if s_q == s_q and s_q >= 40
                 else "What the ‘how to improve’ box was used for",
                 "Every substantive answer to ‘how could the training be improved’, by what kind of answer it was.",
                 intent_bars(themes) + '<h3>What they still wanted to know</h3><p class="muted" style="margin:0 0 18px">'
                 f'Topics of the comments that asked a question (all respondents).</p>' + ranked_bars(theme_rows(themes, "improve", "q_"))),
-        section("07 · Suggestions", "What participants would change",
-                "Themes in suggestion and question comments, as a share of all substantive ‘improve’ comments.",
+        section("Suggestions", "What participants would change",
+                "Themes in suggestion and question comments, as a share of all substantive ‘improve’ comments. Outreach requests support a small demand pilot before expansion. Track registrations, attendance and staff time rather than fewer requests.",
                 ranked_bars(theme_rows(themes, "improve", "im_"))),
-        section("08 · Reach", (f"{datetime.strptime(months.idxmax(), '%Y-%m'):%B %Y} was the busiest month, "
+        section("Sessions", sess_title, sess_sub, session_chart(sess, split),
+                "Flags compare each group’s margin with the benchmark. They omit benchmark uncertainty, dependence within sessions and adjustment for repeated comparisons. Use them to generate questions, never to rank trainers or count successful sessions."),
+        section("Reach", (f"{datetime.strptime(months.idxmax(), '%Y-%m'):%B %Y} was the busiest month, "
                                f"with <em>{months.max():,}</em> responses") if not months.empty else "Responses by month",
                 "Survey responses by the month they were submitted.", month_columns(months)),
     ])
@@ -1053,11 +1051,11 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
          "They stay unscored until EveryMind confirms what they mean."),
         ("“Likely to call 988” is partial", f"Only {h['likely_n']:,} people answered it, so it is left out of the headline figures."),
         ("Comment themes are keyword rules", "A first pass by rules, not a person reading each comment. "
-         + ("A hand check of a random sample is pending." if not checked else f"Checked against {checked} hand-coded comments.")),
-        ("Small groups are protected", f"Groups and cells under {min_n} are pooled or suppressed. ‘Thin’ marks groups of 10–29."),
+         + ("A hand check of a random sample is pending." if not checked else f"Scored against {checked} human review entries, including repeated comments. Rules were tuned on this sample; agreement is calibration, not held-out accuracy.")),
+        ("Small groups are pooled or suppressed", f"Groups and cells under {min_n} are pooled or suppressed. ‘Thin’ marks groups of 10–29."),
     ]
     cav = "".join(f"<div><b>{e(t)}</b><p>{e(p)}</p></div>" for t, p in caveats)
-    body += (f'<section><div class="wrap"><div class="sec-head"><p class="eyebrow">09 · About this data</p>'
+    body += (f'<section><div class="wrap"><div class="sec-head"><p class="eyebrow">About this data</p>'
              f'<h2>Read this before using the numbers</h2></div><div class="cav">{cav}</div></div></section>')
     body += (f'<section style="padding-top:0"><div class="wrap"><details class="tv"><summary>All group comparisons (tables)</summary>'
              f'<div class="card" style="margin-top:16px">{group_tables_html(groups)}</div></details></div></section>')
@@ -1068,6 +1066,7 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
 <title>Understanding 988 Survey</title><style>{font_faces()}{CSS}</style></head>
 <body>
 <header class="wrap topbar"><span class="mark">Understanding 988</span><span class="meta">Training survey report · run {e(man.get("run_id", "?"))}</span></header>
+<nav class="wrap section-nav" aria-label="Report sections"><a href="#findings">Findings</a><a href="#priorities">Interventions</a><a href="#explore">Explore the data</a><a href="#sessions">Session diagnostics</a></nav>
 {hero}{key}{plan}{body}
 <footer><div class="wrap"><span class="mark">Understanding 988</span>
 <p>Built by dashboard.py from {e(inp.get("name", "?"))} (SHA-256 {e(inp.get("sha256", "")[:12])}…) on {datetime.now():%Y-%m-%d %H:%M}.
@@ -1087,6 +1086,7 @@ def main(argv=None):
     out = Path(a.out)
     min_n = int(strip_comments(json.loads(Path(a.config).read_text()))["thresholds"]["small_group_min_n"])
     data = load(out)
+    data['interventions'] = interventions.read_logs(out / 'measurement')
     cur = snapshot(data, headline(data["clean"], min_n))
     hist_path = out / HISTORY
     try:
