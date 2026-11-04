@@ -58,8 +58,8 @@ def main():
         page = page_path.read_text(encoding="utf-8") if page_path.exists() else ""
         txt = text_of(page)
         check("headline: response count", "30 responses" in txt, txt[:600])
-        check("headline: describe change computed from pairs (+100 points)",
-              "Describe 988 and how it works: +100 points" in txt and "0% agreed before the training (recalled) and 100% after" in txt, txt[:900])
+        check("headline: describe change computed from pairs (+100%)",
+              "Describe 988 and how it works: +100%" in txt and "0% agreed before the training (recalled) and 100% after" in txt, txt[:900])
         check("headline: NPS (+33)", "NPS +33" in txt, txt[:600])
         check("students vs everyone else hidden when a group is under the minimum size", "Recommendation gap:" not in txt)
         check("fonts embedded in the page", page.count("data:font/woff2;base64,") == 3)
@@ -67,18 +67,20 @@ def main():
         check("self-contained: no external URLs", not re.search(r"(src|href)=[\"']?(https?:)?//", page))
         check("provisional banner while no rows are hand-checked", "Comment themes are provisional" in txt)
         check("no half-written temp file left", not (out / ".dashboard.html.tmp").exists())
-        check("every chart has a table view", page.count("Show the numbers") == 9, str(page.count("Show the numbers")))
+        check("every chart has a table view", page.count("Show the numbers") == 8, str(page.count("Show the numbers")))
         # 10 promoters, 20 passives: margin = 1.96 * sqrt((1/3 - 1/9) / 29) * 100 = 17.2
         check("NPS shown with its 95% margin of error", "NPS +33 ±17" in txt, txt[:700])
         check("action plan: each step has an owner, effort and measure",
-              "What to do next" in txt and txt.count("Measures and operational detail") == txt.count("Trigger") == 3
+              "What to do next" not in txt and "Three intervention buckets" in txt
+              and txt.count("Measures and operational detail") == txt.count("Trigger") == 3
               and "correct-answer" in txt, txt[txt.find("What to do next"):][:600])
         check("first run: no 'since the last run' strip", "Since the last run" not in txt)
         check("run history recorded", (out / "dashboard_history.json").exists())
 
         import dashboard
         data = dashboard.load(out)
-        cube = json.loads(re.search(r'id="xdata">(.*?)</script>', page, re.S).group(1))
+        check("explorer is not rendered", "Check any figure for your own audience" not in txt and 'id="xdata"' not in page)
+        cube = dashboard.explore_cube(data["clean"], 10)
         whole = cube["views"]["*|*|*"]
         check("explorer: unfiltered view matches the headline", whole["n"] == 30 and whole["nps"][0] == 33.3, str(whole))
 

@@ -389,14 +389,14 @@ def dumbbells(groups: pd.DataFrame, h: dict, d: pd.DataFrame) -> str:
                 body.append(f'<div class="{cls}"><div class="lab">{e(label)}</div><div class="track none">suppressed (under 10)</div><div class="val"></div></div>')
                 continue
             lo, hi = min(b, a), max(b, a)
-            t = f"{label}: {b:.0f}% agreed before → {a:.0f}% after ({signed(ch)} pts{margin_text(moe)}), n = {int(n):,}"
+            t = f"{label}: {b:.0f}% agreed before → {a:.0f}% after ({signed(ch)}%{margin_text(moe)}), n = {int(n):,}"
             body.append(
                 f'<div class="{cls}"><div class="lab">{e(label)}{badge(status, rel)}</div>'
                 f'<div class="track" {tip(t)}>{gridlines(PCT100, 0, 100)}'
                 f'<i class="link" style="left:{lo:.2f}%;width:{hi - lo:.2f}%"></i>'
                 f'<i class="dot ring" style="left:{b:.2f}%"></i><i class="dot c-gold" style="left:{a:.2f}%"></i></div>'
                 f'<div class="val"><b>{signed(ch)}</b> <span class="moe">{pm(moe)}</span></div></div>')
-            trows.append([e(it["label"]), e(label), pct(b), pct(a), f"{signed(ch)} pts", pm(moe), f"{int(n):,}"])
+            trows.append([e(it["label"]), e(label), pct(b), pct(a), f"{signed(ch)}%", pm(moe), f"{int(n):,}"])
         panels.append(f'<div class="panel"><h4>{e(it["label"])}</h4>{"".join(body)}{axis(PCT100, 0, 100)}</div>')
     return (legend([("Before (recalled)", "ring"), ("After the training", "c-gold")])
             + "".join(panels)
@@ -453,20 +453,6 @@ def session_chart(s: dict, split) -> str:
             + table_view(["Date/county group", "Responses", "Students", "NPS", "Margin (95%)", "Benchmark", "Know when to use 988 (after)", ""], trows))
 
 
-def explore_html(cube: dict, flagged: int) -> str:
-    labels = {"county": ("County", "All counties"), "role": ("Role", "All roles")}
-    sels = "".join(f'<label>{lab}<select id="f-{k}"><option value="*">{e(all_)}</option>'
-                   + "".join(f'<option value="{e(o)}">{e(o)}</option>' for o in cube["options"][k]) + "</select></label>"
-                   for k, (lab, all_) in labels.items())
-    data = json.dumps(cube, separators=(",", ":")).replace("</", "<\\/")
-    return (f'<div class="filters">{sels}<label class="chk"><input type="checkbox" id="f-flag"> '
-            f'Leave out the {flagged} flagged response{"" if flagged == 1 else "s"}</label></div>'
-            '<div id="xout" aria-live="polite"><p class="muted">Filters need JavaScript.</p></div>'
-            '<details class="tv"><summary>Show the numbers</summary><div class="tw"><table><thead><tr><th>Figure</th>'
-            '<th>Before</th><th>After</th><th>Change</th><th>Margin (95%)</th><th>Valid n</th></tr></thead>'
-            f'<tbody id="xtbody"></tbody></table></div></details><script type="application/json" id="xdata">{data}</script>')
-
-
 def since_html(prev: dict | None, cur: dict) -> str:
     """'Since the last run' strip: the previous run recorded in dashboard_history.json with a different export or settings."""
     if not prev:
@@ -480,7 +466,7 @@ def since_html(prev: dict | None, cur: dict) -> str:
     for key, lab in ITEMS:
         a, b = prev["items"].get(key), cur["items"].get(key)
         if a and b:
-            chips.append((f"{lab} (after)", f"{pct(a['after'])} → {pct(b['after'])}", f"{signed(b['after'] - a['after'])} pts"))
+            chips.append((f"{lab} (after)", f"{pct(a['after'])} → {pct(b['after'])}", f"{signed(b['after'] - a['after'])}%"))
     cells = "".join(f'<div><span>{e(lab)}</span><b>{e(val)}</b><i>{e(dlt)}</i></div>' for lab, val, dlt in chips)
     src = ("the same export with different settings" if same_input else e(prev["input"]))
     return (f'<div class="since"><p class="eyebrow">Since the last run · {e(when)} · {src}</p><div class="chips">{cells}</div>'
@@ -750,20 +736,6 @@ font:300 22px/1 var(--serif)}
 .act dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 24px;margin:0}
 .act dt{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ash);margin-bottom:3px}
 .act dd{margin:0;font-size:14px;color:var(--ink);line-height:1.4}
-.filters{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:flex-end;margin:0 0 22px}
-.filters label{display:flex;flex-direction:column;gap:5px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--stone)}
-.filters select{font:400 15px var(--sans);color:var(--ink);background:var(--canvas);border:1px solid var(--hair);border-radius:999px;
-padding:8px 34px 8px 14px;appearance:none;-webkit-appearance:none;min-width:170px;
-background-image:linear-gradient(45deg,transparent 50%,var(--stone) 50%),linear-gradient(135deg,var(--stone) 50%,transparent 50%);
-background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;background-size:5px 5px;background-repeat:no-repeat}
-.filters .chk{flex-direction:row;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:14px;font-weight:400;
-color:var(--ink);padding:9px 0}
-.filters input{width:17px;height:17px;accent-color:var(--ink)}
-.filters select:focus-visible,.filters input:focus-visible,.next a:focus-visible{outline:2px solid var(--stone);outline-offset:2px}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:22px}
-.tiles div{background:var(--canvas);border-radius:18px;padding:16px 18px}
-.tiles b{display:block;font:300 34px/1.05 var(--serif)}.tiles span{font-size:13px;color:var(--ash)}
-.none-msg{background:var(--canvas);border-radius:18px;padding:22px;margin:0;color:var(--stone)}
 .since{margin-top:30px;background:var(--surface);border:1px solid var(--hair);border-radius:24px;padding:22px 24px}
 .since .eyebrow{margin-bottom:14px}
 .chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px 22px}
@@ -771,7 +743,7 @@ color:var(--ink);padding:9px 0}
 .chips b{font-weight:600;font-variant-numeric:tabular-nums}.chips i{font-style:normal;font-size:13px;color:var(--stone)}
 .since .muted{font-size:13px;margin:14px 0 0}
 @media (max-width:640px){.wrap{padding:0 16px}.act{grid-template-columns:1fr;padding:20px}.al{width:36px;height:36px;font-size:18px}
-.filters label{flex:1 1 140px}.filters select{min-width:0;width:100%}section{padding:52px 0}.card{padding:20px 16px;border-radius:18px}
+section{padding:52px 0}.card{padding:20px 16px;border-radius:18px}
 .row{grid-template-columns:1fr 64px;gap:2px 10px}.row .lab{grid-column:1/-1}.row .track{grid-column:1}.row .val{grid-column:2}
 .axis-row>div:first-child{display:none}.srow{grid-template-columns:1fr}.badges{gap:14px;justify-content:space-between}
 .badge-c{width:calc(33% - 10px)}.circle{width:96px;height:96px}.circle b{font-size:30px}.cols{gap:3px}.topbar .meta{display:none}}
@@ -785,48 +757,13 @@ function show(el,x,y){tip.textContent=el.dataset.tip;tip.style.opacity=1;
 document.addEventListener('pointermove',ev=>{const el=ev.target.closest('[data-tip]');if(el)show(el,ev.clientX,ev.clientY);else tip.style.opacity=0});
 document.addEventListener('focusin',ev=>{const el=ev.target.closest('[data-tip]');if(!el)return;const r=el.getBoundingClientRect();show(el,r.left+r.width/2,r.top)});
 document.addEventListener('focusout',()=>tip.style.opacity=0);
-const xd=document.getElementById('xdata');
-if(xd){
- const X=JSON.parse(xd.textContent),$=id=>document.getElementById(id);
- const sg=x=>{const r=Math.round(x);return (r<0?'\\u2212':'+')+Math.abs(r)};
- const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
- const tipA=t=>'tabindex="0" data-tip="'+esc(t)+'" aria-label="'+esc(t)+'"';
- const grid=[0,25,50,75,100].map(t=>'<i class="gl" style="left:'+t+'%"></i>').join('');
- const axis='<div class="row axis-row"><div></div><div class="axis">'+[0,25,50,75,100].map(t=>'<span style="left:'+t+'%">'+t+'%</span>').join('')+'</div><div></div></div>';
- function render(){
-  const key=['county','role'].map(k=>$('f-'+k).value).concat($('f-flag').checked?'kept':'*').join('|');
-  const v=X.views[key],out=$('xout'),tb=$('xtbody');
-  if(!v){out.innerHTML='<p class="none-msg">Not shown for this selection: it has too few responses, or showing it would let someone work out a group of fewer than 10 people. Try a broader selection.</p>';tb.innerHTML='';return}
-  let h='<div class="tiles"><div><b>'+v.n.toLocaleString()+'</b><span>responses · '+v.s+' date/county group'+(v.s==1?'':'s')+'</span></div>';
-  h+=v.nps?'<div><b>NPS '+sg(v.nps[0])+'</b><span>'+(v.nps[1]!==null?'±'+Math.round(v.nps[1])+' · ':'')+v.nps[2].toLocaleString()+' ratings</span></div>':'<div><b>—</b><span>too few ratings for NPS</span></div>';
-  h+='</div><div class="legend"><span><i class="key ring"></i>Before (recalled)</span><span><i class="key c-gold"></i>After the training</span></div><div class="panel">';
-  let rows='';
-  X.items.forEach((lab,i)=>{const it=v.items[i];
-   if(!it){h+='<div class="row"><div class="lab">'+esc(lab)+'</div><div class="track none">too few answers</div><div class="val"></div></div>';rows+='<tr><td>'+esc(lab)+'</td><td colspan="5">too few answers</td></tr>';return}
-   const [b,a,g,m,n]=it,lo=Math.min(a,b),hi=Math.max(a,b),pmT=m!==null?'±'+Math.round(m):'';
-   const t=lab+': '+Math.round(b)+'% agreed before → '+Math.round(a)+'% after ('+sg(g)+' pts'+(pmT?', margin '+pmT:'')+'), n = '+n.toLocaleString();
-   h+='<div class="row"><div class="lab">'+esc(lab)+'</div><div class="track" '+tipA(t)+'>'+grid+'<i class="link" style="left:'+lo+'%;width:'+(hi-lo)+'%"></i><i class="dot ring" style="left:'+b+'%"></i><i class="dot c-gold" style="left:'+a+'%"></i></div><div class="val"><b>'+sg(g)+'</b> <span class="moe">'+pmT+'</span></div></div>';
-   rows+='<tr><td>'+esc(lab)+'</td><td>'+Math.round(b)+'%</td><td>'+Math.round(a)+'%</td><td>'+sg(g)+' pts</td><td>'+pmT+'</td><td>'+n.toLocaleString()+'</td></tr>'});
-  out.innerHTML=h+axis+'</div>';
-  tb.innerHTML=rows+(v.nps?'<tr><td>NPS</td><td colspan="2"></td><td>'+sg(v.nps[0])+'</td><td>'+(v.nps[1]!==null?'±'+Math.round(v.nps[1]):'')+'</td><td>'+v.nps[2].toLocaleString()+'</td></tr>':'');
- }
- // mark the menu choices that can't be shown with the other current filters
- function mark(){
-  const cur={county:$('f-county').value,role:$('f-role').value,flag:$('f-flag').checked?'kept':'*'};
-  ['county','role'].forEach(k=>{for(const o of $('f-'+k).options){
-   const t={...cur,[k]:o.value},ok=!!X.views[[t.county,t.role,t.flag].join('|')];
-   o.textContent=o.dataset.l+(ok?'':' (too few)')}});
- }
- for(const o of document.querySelectorAll('.filters option'))o.dataset.l=o.textContent;
- ['f-county','f-role','f-flag'].forEach(id=>$(id).addEventListener('change',()=>{render();mark()}));
- mark();
- render();
-}
 """
 
 
 def section(eyebrow: str, title: str, sub: str, content: str, note: str = "", band: bool = False) -> str:
-    return (f'<section id="{e(eyebrow.lower().replace(" ", "-"))}"{" class=band" if band else ""}><div class="wrap"><div class="sec-head"><p class="eyebrow">{e(eyebrow)}</p>'
+    section_id = f' id="{e(eyebrow.lower().replace(" ", "-"))}"' if eyebrow else ""
+    eyebrow_html = f'<p class="eyebrow">{e(eyebrow)}</p>' if eyebrow else ""
+    return (f'<section{section_id}{" class=band" if band else ""}><div class="wrap"><div class="sec-head">{eyebrow_html}'
             f'<h2>{title}</h2>{f"<p class=sub>{e(sub)}</p>" if sub else ""}</div>'
             f'<div class="card">{content}</div>{f"<p class=note>{e(note)}</p>" if note else ""}</div></section>')
 
@@ -844,7 +781,7 @@ def findings(h: dict, themes: pd.DataFrame, sess: dict) -> tuple:
                    "Pilot a five-minute scenario and a staff-approved call demonstration, replacing lecture time where feasible",
                    "Curriculum lead", "8–12 preparation hours plus 1 hour to brief facilitators",
                    "Use the same knowledge check in comparable sessions with and without the activity. Report correct answers, valid counts and missing answers by item. Track delivery time; small nonrandom differences remain exploratory.")
-    out.append((f"{best['label']}: <em>{signed(best['gain'])} points</em>",
+    out.append((f"{best['label']}: <em>{signed(best['gain'])}%</em>",
                 f"{pct(best['before'])} agreed before the training (recalled) and {pct(best['after'])} after "
                 f"(margin ±{best['moe']:.0f}). These are self-rated changes, not independently measured learning or behavior.", [activity]))
     split = h["nps_split"]
@@ -964,12 +901,11 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
                    f"{tman.get('validation', {}).get('rows_total', checked)} review entries scored; "
                    "calibration sample, not held-out accuracy")
     badges = "".join(
-        f'<div class="badge-c"><div class="circle"><b>{signed(i["gain"])}</b><span>points</span></div><p>{e(i["label"])}</p></div>'
+        f'<div class="badge-c"><div class="circle"><b>{signed(i["gain"])}%</b></div><p>{e(i["label"])}</p></div>'
         for i in sorted(h["items"], key=lambda i: -i["gain"]))
     nps_fact = f"<span>Would recommend: <b>NPS {signed(h['nps'])}</b> <span class='muted'>{pm(h['nps_moe'])}</span></span>"
     hero = f"""
 <div class="wrap hero">
-  <p class="eyebrow">Post-training survey · {e(span)}</p>
   <h1>After the training, <em>{pct(when["after"])}</em> say they know when to use 988.</h1>
   <p class="lead">Up from {pct(when["before"])} who recall knowing before. Self-rated agreement on all three questions, before and after:</p>
   <div class="badges">{badges}</div>
@@ -987,7 +923,7 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
         + "".join(f'<a href="#act-{aid}">{chr(64 + num_of[aid])}. {e(acts[aid]["short"])}</a>' for aid in ids)
         + "</div></div>"
         for i, (t, p, ids) in enumerate(fs, 1))
-    key = (f'<section id="findings"><div class="wrap"><div class="sec-head"><p class="eyebrow">At a glance</p>'
+    key = (f'<section id="findings"><div class="wrap"><div class="sec-head">'
            f'<h2>What the survey says, in {len(fs)} findings</h2></div><div class="findings">{finding_cards}</div></div></section>')
     logs, policy = data.get('interventions', ({k: [] for k in interventions.FIELDS}, interventions.DEFAULT))
     states = interventions.evaluate(logs, policy, min_n)
@@ -1007,7 +943,7 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
           f'<details><summary>Measures and operational detail</summary><p>{e(a["measure"])}</p><p>{e(a["effort"])}</p>'
           f'<ul>{details}</ul><p>Staff action register (separate from calculated flags)</p><ul>{reviews or "<li>No staff decisions recorded.</li>"}</ul></details></div></div>')
     versions = sorted(set('/'.join(r[k] for k in ('form_version','curriculum_version','faq_version','scenario_version')) for r in logs['sessions']))
-    plan = (f'<section class="plan" id="priorities"><div class="wrap"><div class="sec-head"><p class="eyebrow">What to do next</p>'
+    plan = (f'<section class="plan" id="priorities"><div class="wrap"><div class="sec-head">'
             '<h2>Three intervention buckets, <em>with explicit triggers</em></h2>'
             '<p class="sub">Proposed pilot thresholds, not rules validated by the historical survey. Call tracing here means a staff-verified teaching explanation of the call journey, privacy and location handling. '
             'No real caller records are collected. Questions and low NPS alone do not trigger venue changes.</p>'
@@ -1033,78 +969,22 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
     wf = h["without_flagged"]
 
     body = "".join([
-        section("Confidence", "Every group reports more confidence after the training" if all_up else "Self-rated confidence, before and after",
-                "Share answering agree or strongly agree (4–5). Both ratings were collected after the session; "
-                "the ‘before’ is recalled, so this is self-report, not measured learning. "
-                "± is the 95% margin of error on the change.",
-                dumbbells(groups, h, d)),
-        section("Recommendation", nps_title,
-                "Net Promoter Score: the share scoring 9–10 minus the share scoring 0–6, from −100 to +100. "
-                "The thin line on each bar is its 95% margin of error.",
-                nps_bars(groups, h, d),
-                f"{h['fives']} respondents chose exactly 5 and {pct(h['fives_student_pct'])} of them were students "
-                f"(students are {pct(h['student_pct'])} of respondents). Some may have used the midpoint as ‘no opinion’; "
-                "the data can't confirm this. NPS measures recommendation, not learning.", band=True),
-        section("Explore", "Check any figure <em>for your own audience</em>",
-                "Filter by county and role, or leave out the responses flagged for review. "
-                f"Groups under {min_n} are suppressed with complementary suppression within filters. Combining different tables can still narrow groups; use this file internally.",
-                explore_html(explore_cube(d, min_n), h["flagged"])),
-        section("What stuck", "What people found <em>most valuable</em> depends on who they are",
-                f"Themes in answers to ‘the most valuable thing you learned’. Sorted from themes non-students mention more "
-                f"(top) to themes students mention more (bottom). A comment can have several themes.",
-                theme_dots(theme_rows(themes, "most_valuable", "mv_"))),
-        section("Feedback",
-                "For students, the feedback box <em>became a question box</em>" if s_q == s_q and s_q >= 40
-                else "What the ‘how to improve’ box was used for",
-                "Every substantive answer to ‘how could the training be improved’, by what kind of answer it was.",
-                intent_bars(themes) + '<h3>What they still wanted to know</h3><p class="muted" style="margin:0 0 18px">'
-                f'Topics of the comments that asked a question (all respondents).</p>' + ranked_bars(theme_rows(themes, "improve", "q_"))),
-        section("Suggestions", "What participants would change",
-                "Themes in suggestion and question comments, as a share of all substantive ‘improve’ comments. Outreach requests support a small demand pilot before expansion. Track registrations, attendance and staff time rather than fewer requests.",
-                ranked_bars(theme_rows(themes, "improve", "im_"))),
-        section("Sessions", sess_title, sess_sub, session_chart(sess, split),
-                "Flags compare each group’s margin with the benchmark. They omit benchmark uncertainty, dependence within sessions and adjustment for repeated comparisons. Use them to generate questions, never to rank trainers or count successful sessions."),
-        section("Reach", (f"{datetime.strptime(months.idxmax(), '%Y-%m'):%B %Y} was the busiest month, "
-                               f"with <em>{months.max():,}</em> responses") if not months.empty else "Responses by month",
-                "Survey responses by the month they were submitted.", month_columns(months)),
+        section("", "Every group reports more confidence after the training" if all_up else "Self-rated confidence, before and after",
+                "Share answering agree or strongly agree (4–5). Both ratings were collected after the session; the ‘before’ is recalled, so this is self-report, not measured learning. ± is the 95% margin of error on the change.", dumbbells(groups, h, d)),
+        section("", nps_title, "Net Promoter Score: the share scoring 9–10 minus the share scoring 0–6, from −100 to +100. The thin line on each bar is its 95% margin of error.", nps_bars(groups, h, d), f"{h['fives']} respondents chose exactly 5 and {pct(h['fives_student_pct'])} of them were students (students are {pct(h['student_pct'])} of respondents). Some may have used the midpoint as ‘no opinion’; the data can't confirm this. NPS measures recommendation, not learning.", band=True),
+        section("", "What people found <em>most valuable</em> depends on who they are", "Themes in answers to ‘the most valuable thing you learned’. Sorted from themes non-students mention more (top) to themes students mention more (bottom). A comment can have several themes.", theme_dots(theme_rows(themes, "most_valuable", "mv_"))),
+        section("", "For students, the feedback box <em>became a question box</em>" if s_q == s_q and s_q >= 40 else "What the ‘how to improve’ box was used for", "Every substantive answer to ‘how could the training be improved’, by what kind of answer it was.", intent_bars(themes) + '<h3>What they still wanted to know</h3><p class="muted" style="margin:0 0 18px">' + f'Topics of the comments that asked a question (all respondents).</p>' + ranked_bars(theme_rows(themes, "improve", "q_"))),
+        section("", "What participants would change", "Themes in suggestion and question comments, as a share of all substantive ‘improve’ comments. Outreach requests support a small demand pilot before expansion. Track registrations, attendance and staff time rather than fewer requests.", ranked_bars(theme_rows(themes, "improve", "im_"))),
+        section("", sess_title, sess_sub, session_chart(sess, split), "Flags compare each group’s margin with the benchmark. They omit benchmark uncertainty, dependence within sessions and adjustment for repeated comparisons. Use them to generate questions, never to rank trainers or count successful sessions."),
+        section("", (f"{datetime.strptime(months.idxmax(), '%Y-%m'):%B %Y} was the busiest month, with <em>{months.max():,}</em> responses") if not months.empty else "Responses by month", "Survey responses by the month they were submitted.", month_columns(months)),
     ])
-
-    caveats = [
-        ("Self-report, not measured learning", "Before and after ratings were both given after the training, with ‘before’ recalled. "
-         "There is no knowledge test, comparison group or record of calls."),
-        ("Nothing is dropped", f"{h['flagged']} responses carry a review flag (speeders, possible duplicates and similar). "
-         f"They are kept. Without them, NPS is {signed(wf['nps'])} (vs {signed(h['nps'])}) and no self-rated gain moves by more "
-         f"than {max(abs(a['gain'] - b['gain']) for a, b in zip(h['items'], wf['items'])):.1f} points; "
-         "the Explore filters show any figure without them."),
-        ("Margins of error", "± is a 95% margin of error for random variation. It does not cover who chose to answer, "
-         "how people recalled ‘before’, or the comment rules."),
-        ("Two labels left unscored", f"{h['ambiguous_rows']} responses use “Very agree” or “Satisfied”, which aren't on the standard scale. "
-         "They stay unscored until EveryMind confirms what they mean."),
-        ("“Likely to call 988” is partial", f"Only {h['likely_n']:,} people answered it, so it is left out of the headline figures."),
-        ("Comment themes are keyword rules", "A first pass by rules, not a person reading each comment. "
-         + ("A hand check of a random sample is pending." if not checked else f"Scored against {checked} human review entries, including repeated comments. Rules were tuned on this sample; agreement is calibration, not held-out accuracy.")),
-        ("Small groups are pooled or suppressed", f"Groups and cells under {min_n} are pooled or suppressed. ‘Thin’ marks groups of 10–29."),
-    ]
-    cav = "".join(f"<div><b>{e(t)}</b><p>{e(p)}</p></div>" for t, p in caveats)
-    body += (f'<section><div class="wrap"><div class="sec-head"><p class="eyebrow">About this data</p>'
-             f'<h2>Read this before using the numbers</h2></div><div class="cav">{cav}</div></div></section>')
-    body += (f'<section style="padding-top:0"><div class="wrap"><details class="tv"><summary>All group comparisons (tables)</summary>'
-             f'<div class="card" style="margin-top:16px">{group_tables_html(groups)}</div></details></div></section>')
 
     inp = man.get("input", {})
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Understanding 988 Survey</title><style>{font_faces()}{CSS}</style></head>
+<title>Survey dashboard</title><style>{font_faces()}{CSS}</style></head>
 <body>
-<header class="wrap topbar"><span class="mark">Understanding 988</span><span class="meta">Training survey report · run {e(man.get("run_id", "?"))}</span></header>
-<nav class="wrap section-nav" aria-label="Report sections"><a href="#findings">Findings</a><a href="#priorities">Interventions</a><a href="#explore">Explore the data</a><a href="#sessions">Session diagnostics</a></nav>
 {hero}{key}{plan}{body}
-<footer><div class="wrap"><span class="mark">Understanding 988</span>
-<p>Built by dashboard.py from {e(inp.get("name", "?"))} (SHA-256 {e(inp.get("sha256", "")[:12])}…) on {datetime.now():%Y-%m-%d %H:%M}.
-Aggregate figures only; no comment text. Small cells are suppressed within each table, but comparing tables could still narrow
-down a small group, so treat this as an internal working file.</p>
-<p>Full detail: data_quality_report.md and themes/themes_report.md. Fonts: Newsreader and Hanken Grotesk (SIL Open Font License).</p>
-</div></footer>
 <div id="tip" role="tooltip"></div><script>{JS}</script></body></html>
 """
 

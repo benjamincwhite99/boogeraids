@@ -72,6 +72,18 @@ python3 dashboard.py                   # after themes.py (run_all.py does this f
 python3 tests/test_dashboard.py        # synthetic tests
 ```
 
+### New-export intake check
+
+Before running a newer export, launch a local drag-and-drop compatibility check:
+
+```bash
+python3 intake_server.py                # open http://127.0.0.1:8765
+# or, for a terminal/automation check:
+python3 preflight.py new_export.xlsx
+```
+
+It never changes `output/`. It reports the row count, required-column mapping, unused new columns, and labels that the current configuration would flag, so staff can fix a changed Forms export before publishing a dashboard.
+
 Writes `output/dashboard.html`, a one-page visual report that opens in any browser, offline, and works at phone width. It leads with the headline result and a short list of findings, then covers self-rated change by role, NPS by role, what students and everyone else found most valuable, what the "improve" box was used for, the questions people still had, suggested improvements, responses by month, and the caveats to read before using any number. All group tables are at the end.
 
 - **Written from the data.** Every headline and finding is generated from this run's numbers, and a finding only appears when the data supports it, so a new export needs no editing.
