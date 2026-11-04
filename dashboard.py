@@ -901,6 +901,37 @@ def findings(h: dict, themes: pd.DataFrame, sess: dict) -> tuple:
     acts['delivery']['evidence'] = f"Call experience: {count('q_call_experience')} questions; privacy/police: {count('q_privacy_police')}. These broad topics are not tracing-specific counts."
     acts['adaptation']['evidence'] = f"Interaction: {count('im_more_interactive')} improvement comments; examples: {count('im_examples_stories')}. The recommendation gap does not establish the cause."
     acts['structural']['evidence'] = f"Broad logistics: {count('im_logistics')} comments; pacing: {count('im_time_pacing')}. Historical data does not measure venue interruptions."
+    # Bucket titles and "because" bodies, grounded in the survey figures above.
+    def theme(field, theme_id, group='All'):
+        rows = themes[(themes['field']==field) & (themes['id']==theme_id) & (themes['group']==group)]
+        return rows.iloc[0] if not rows.empty and rows.iloc[0]['status'] == 'shown' else None
+    a_title = 'Staff demonstration of a 60–90 second phone call with 988'
+    acts['delivery'].update(short=a_title, do=a_title)
+    qa, qc, qp = theme('improve', 'question'), theme('improve', 'q_call_experience'), theme('improve', 'q_privacy_police')
+    if qa is not None and qc is not None:
+        qs = theme('improve', 'question', STUDENTS)
+        who = f", {int(qs['n'])} of them from students" if qs is not None else ""
+        priv = f", and another {int(qp['n'])} asked about privacy or police involvement" if qp is not None else ""
+        acts['delivery']['change'] = (
+            f"Because many students still didn't understand what actually happens on a call: {int(qa['n'])} of "
+            f"{int(qa['denominator'])} improvement comments were questions{who}. The most common question topic was what a call "
+            f"is like and who answers ({int(qc['n'])} of {int(qc['denominator'])}){priv}. A short, staff-verified "
+            "demonstration answers these directly, including how privacy and location are handled.")
+    b_title = 'Student-specific training'
+    acts['adaptation'].update(short=b_title, do=b_title)
+    if split:
+        acts['adaptation']['change'] = (
+            f"Because students gave the training an NPS of {signed(split['s'])}, compared with {signed(split['o'])} from other "
+            f"respondents ({split['sn']:,} student and {split['on']:,} other ratings). Rebuild examples and activities around "
+            "student situations (exam pressure, falling behind, worrying about a friend at school) while keeping the factual guidance the same.")
+    c_title = 'Environmental changes: quieter room, better microphone'
+    acts['structural'].update(short=c_title, do=c_title)
+    lg = theme('improve', 'im_logistics')
+    if lg is not None:
+        acts['structural']['change'] = (
+            f"Because participants raised the setting itself: {int(lg['n'])} of {int(lg['denominator'])} improvement comments were about "
+            "logistics such as tech, format and setting, including a request for a microphone, a request for a private space to ask "
+            "questions, and audio/video problems that got in the way of the presentation. Use a quieter room and a working microphone.")
     for i, (_, _, ids) in enumerate(out, 1):
         for aid in ids: acts[aid]['why'].append(i)
     return out, acts
