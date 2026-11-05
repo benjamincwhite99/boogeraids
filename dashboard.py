@@ -742,7 +742,15 @@ font:300 22px/1 var(--serif)}
 .chips div{display:flex;flex-direction:column;gap:2px}.chips span{font-size:13px;color:var(--ash)}
 .chips b{font-weight:600;font-variant-numeric:tabular-nums}.chips i{font-style:normal;font-size:13px;color:var(--stone)}
 .since .muted{font-size:13px;margin:14px 0 0}
+.dash-head{display:flex;justify-content:space-between;align-items:center;gap:24px;min-height:72px;border-bottom:1px solid var(--hair);font-size:14px}
+.dash-head>div{display:flex;align-items:baseline;gap:18px}.dash-head .mark{letter-spacing:.08em}.dash-meta{color:var(--ash);font-variant-numeric:tabular-nums}.dash-head nav{display:flex;gap:18px}.dash-head a{color:var(--stone);text-decoration:none;font-size:13px;font-weight:600}.dash-head a:hover{text-decoration:underline;text-underline-offset:4px}
+.overview{padding:36px 0 28px;background:var(--canvas)}.overview-copy{display:flex;align-items:end;justify-content:space-between;gap:32px;margin-bottom:22px}.overview .eyebrow{margin:0 0 8px}.overview h1{font-size:42px;line-height:1.05;max-width:16ch}.overview-copy>p{max-width:32ch;margin:0 0 4px;color:var(--stone);font-size:16px;line-height:1.4}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:14px;overflow:hidden}.kpi{background:var(--surface);padding:16px 18px;min-height:104px;display:flex;flex-direction:column;justify-content:space-between}.kpi span{font-size:12px;color:var(--ash);font-weight:700;letter-spacing:.06em;text-transform:uppercase}.kpi b{font:300 31px/1 var(--serif);font-variant-numeric:tabular-nums;color:var(--ink)}.kpi small{color:var(--stone);font-size:12px}.overview .pill{margin-top:14px;padding:5px 11px;font-size:12px}.overview .since{margin-top:16px;padding:16px 18px;border-radius:14px}
+.decision-section{padding:24px 0 48px}.decision-grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(340px,5fr);gap:18px}.decision-panel{background:var(--surface);border:1px solid var(--hair);border-radius:16px;overflow:hidden}.decision-panel>header{padding:20px 22px 16px;border-bottom:1px solid var(--hair)}.decision-panel .eyebrow{margin:0 0 8px}.decision-panel h2{font-family:var(--sans);font-size:21px;font-weight:650;letter-spacing:-.02em;max-width:none}.signal{display:grid;grid-template-columns:28px minmax(0,1fr) 145px;gap:14px;padding:17px 22px;border-bottom:1px solid var(--hair);align-items:start}.signal:last-child,.action:last-child{border-bottom:0}.signal-num{font:600 12px/1 var(--sans);color:var(--gold);padding-top:3px}.signal h3,.action h3{font-family:var(--sans);font-size:16px;font-weight:650;letter-spacing:-.01em;line-height:1.3;margin:0 0 5px}.signal p,.action>p{font-size:13.5px;line-height:1.45;color:var(--stone);margin:0}.signal-links{display:flex;flex-direction:column;gap:5px;padding-top:3px}.signal-links a{font-size:12px;line-height:1.3;color:var(--olive);font-weight:650;text-decoration:none}.signal-links a:hover{text-decoration:underline}
+.action{padding:16px 22px;border-bottom:1px solid var(--hair);scroll-margin-top:20px}.action-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}.action-letter{font:600 12px/1 var(--sans);color:var(--gold)}.action-status{font-size:11px;color:var(--olive);border:1px solid color-mix(in srgb,var(--olive) 45%,transparent);background:color-mix(in srgb,var(--olive) 9%,var(--surface));border-radius:999px;padding:3px 8px;white-space:nowrap}.action dl{display:grid;grid-template-columns:1.45fr .8fr;gap:12px;margin:13px 0 0}.action dt{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ash);margin-bottom:3px}.action dd{margin:0;font-size:12px;line-height:1.35;color:var(--ink)}.action details{margin-top:12px;font-size:13px;color:var(--stone)}.action details p{margin:10px 0}.action details ul{margin:8px 0;padding-left:18px}.decision-note{font-size:12px;color:var(--ash);margin:12px 2px}.measurement{margin:18px 0 0;border-top:1px solid var(--hair);padding-top:14px;font-size:13px;color:var(--stone)}.measurement summary{cursor:pointer;font-weight:650;color:var(--ink)}.measurement p{max-width:80ch;margin:9px 0}
+.evidence-intro{padding:32px 0 8px;border-top:1px solid var(--hair)}.evidence-intro .eyebrow{margin-bottom:8px}.evidence-intro h2{font-family:var(--sans);font-size:24px;font-weight:650;max-width:none}.evidence-intro p:last-child{font-size:14px;color:var(--stone);margin:8px 0 0}.evidence-intro+section{padding-top:26px}main>section:not(.overview):not(.decision-section):not(.evidence-intro):not(.methods){padding:30px 0}main>section:not(.overview):not(.decision-section):not(.evidence-intro):not(.methods) .sec-head{display:flex;gap:24px;align-items:baseline;margin-bottom:14px}main>section:not(.overview):not(.decision-section):not(.evidence-intro):not(.methods) h2{font-family:var(--sans);font-size:21px;font-weight:650;max-width:30ch}main>section:not(.overview):not(.decision-section):not(.evidence-intro):not(.methods) .sec-head .sub{font-size:13px;margin:0;max-width:58ch}.card{border-radius:16px;padding:22px}.methods{padding:32px 0 56px}.methods details{border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:17px 0}.methods summary{font:650 18px/1.3 var(--sans);cursor:pointer}.methods-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 32px;margin-top:12px}.methods-grid p{font-size:13px;line-height:1.45;color:var(--stone);margin:10px 0}.methods-grid b{color:var(--ink)}
 @media (max-width:640px){.wrap{padding:0 16px}.act{grid-template-columns:1fr;padding:20px}.al{width:36px;height:36px;font-size:18px}
+ .dash-head{min-height:60px}.dash-head nav{display:none}.dash-head>div{display:block}.dash-meta{display:block;font-size:12px;margin-top:3px}.overview{padding:26px 0 22px}.overview-copy{display:block;margin-bottom:18px}.overview h1{font-size:32px}.overview-copy>p{margin-top:10px}.kpis{grid-template-columns:repeat(2,1fr)}.kpi{min-height:92px;padding:13px}.kpi b{font-size:27px}.decision-grid{grid-template-columns:1fr;gap:14px}.signal{grid-template-columns:24px 1fr}.signal-links{grid-column:2}.action dl{grid-template-columns:1fr}.evidence-intro{padding-top:26px}.methods-grid{grid-template-columns:1fr}
 section{padding:52px 0}.card{padding:20px 16px;border-radius:18px}
 .row{grid-template-columns:1fr 64px;gap:2px 10px}.row .lab{grid-column:1/-1}.row .track{grid-column:1}.row .val{grid-column:2}
 .axis-row>div:first-child{display:none}.srow{grid-template-columns:1fr}.badges{gap:14px;justify-content:space-between}
@@ -900,31 +908,24 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
               else f"Comment themes remain provisional: {checked} of "
                    f"{tman.get('validation', {}).get('rows_total', checked)} review entries scored; "
                    "calibration sample, not held-out accuracy")
-    badges = "".join(
-        f'<div class="badge-c"><div class="circle"><b>{signed(i["gain"])}%</b></div><p>{e(i["label"])}</p></div>'
-        for i in sorted(h["items"], key=lambda i: -i["gain"]))
-    nps_fact = f"<span>Would recommend: <b>NPS {signed(h['nps'])}</b> <span class='muted'>{pm(h['nps_moe'])}</span></span>"
-    hero = f"""
-<div class="wrap hero">
-  <h1>After the training, <em>{pct(when["after"])}</em> say they know when to use 988.</h1>
-  <p class="lead">Up from {pct(when["before"])} who recall knowing before. Self-rated agreement on all three questions, before and after:</p>
-  <div class="badges">{badges}</div>
-  <div class="facts"><span><b>{h["n"]:,}</b> responses</span><span><b>{h["sessions"]}</b> date/county group{"" if h["sessions"] == 1 else "s"}</span>
-    <span><b>{pct(h["student_pct"])}</b> students</span>{nps_fact}</div>
-  <div class="pill"><i></i>{e(status)}</div>
-  {since_html(previous, snapshot(data, h))}
-</div>"""
-
     fs, acts = findings(h, themes, sess)
     num_of = {aid: i for i, aid in enumerate(acts, 1)}
-    finding_cards = "".join(
-        f'<div class="finding"><div class="n">{i:02d}</div><h3>{t}</h3><p>{e(p)}</p>'
-        f'<div class="next"><span>Next step{"s" if len(ids) > 1 else ""}</span>'
-        + "".join(f'<a href="#act-{aid}">{chr(64 + num_of[aid])}. {e(acts[aid]["short"])}</a>' for aid in ids)
-        + "</div></div>"
+    kpis = "".join([
+        f'<div class="kpi"><span>Describe 988</span><b>{signed(next(i for i in h["items"] if i["key"] == "describe")["gain"])}%</b><small>self-rated change</small></div>',
+        f'<div class="kpi"><span>Know when to use it</span><b>{signed(when["gain"])}%</b><small>self-rated change</small></div>',
+        f'<div class="kpi"><span>Would recommend</span><b>NPS {signed(h["nps"])}</b><small>{pm(h["nps_moe"])} · {h["nps_n"]:,} ratings</small></div>',
+        f'<div class="kpi"><span>Priority actions</span><b>{len(acts)}</b><small>proposed for staff review</small></div>',
+    ])
+    hero = f"""
+<header class="wrap dash-head"><div><span class="mark">EveryMind 988 survey</span><span class="dash-meta">{h["n"]:,} responses · {e(span)}</span></div>
+<nav aria-label="Dashboard sections"><a href="#decisions">Decisions</a><a href="#evidence">Evidence</a><a href="#methods">Methods</a></nav></header>
+<main>
+<section class="overview" id="overview"><div class="wrap"><div class="overview-copy"><p class="eyebrow">Decision dashboard</p><h1>Three findings. Three next actions.</h1><p>Survey evidence translated into the choices staff can test next.</p></div>
+<div class="kpis">{kpis}</div><div class="pill"><i></i>{e(status)}</div>{since_html(previous, snapshot(data, h))}</div></section>"""
+    finding_rows = "".join(
+        f'<article class="signal"><span class="signal-num">{i:02d}</span><div><h3>{t}</h3><p>{e(p)}</p></div>'
+        f'<div class="signal-links">' + "".join(f'<a href="#act-{aid}">{e(acts[aid]["short"])}</a>' for aid in ids) + "</div></article>"
         for i, (t, p, ids) in enumerate(fs, 1))
-    key = (f'<section id="findings"><div class="wrap"><div class="sec-head">'
-           f'<h2>What the survey says, in {len(fs)} findings</h2></div><div class="findings">{finding_cards}</div></div></section>')
     logs, policy = data.get('interventions', ({k: [] for k in interventions.FIELDS}, interventions.DEFAULT))
     states = interventions.evaluate(logs, policy, min_n)
     acts['adaptation']['trigger'] = (f"Proposed: below {policy['correct_threshold']:.0%} correct on the same item in at least {policy['repeats']} of the latest {policy['window']} comparable sessions, each with at least {max(min_n, policy['minimum_answered'])} answered checks. Review omissions before deciding.")
@@ -936,22 +937,17 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
         details = ''.join('<li>'+e(v)+'</li>' for v in state['details'])
         human = [r for r in logs['actions'] if r['bucket']==aid]
         reviews = ''.join('<li>'+e(r['action_id']+': '+(r['decision'] or 'proposed action')+' — '+r['owner_role']+'; '+r['action_taken'])+'</li>' for r in human)
-        act_rows += (f'<div class="act" id="act-{aid}"><div class="al">{chr(64 + num_of[aid])}</div><div><h3>{e(a["do"])}</h3>'
-          f'<p><strong>Status: {e(state["status"])}</strong></p><p>{e(a["change"])}</p>'
-          f'<dl><div><dt>Evidence</dt><dd>{e(a["evidence"])}</dd></div><div><dt>Trigger</dt><dd>{e(a["trigger"])}</dd></div>'
-          f'<div><dt>Owner</dt><dd>{e(a["owner"])}</dd></div></dl>'
-          f'<details><summary>Measures and operational detail</summary><p>{e(a["measure"])}</p><p>{e(a["effort"])}</p>'
-          f'<ul>{details}</ul><p>Staff action register (separate from calculated flags)</p><ul>{reviews or "<li>No staff decisions recorded.</li>"}</ul></details></div></div>')
+        act_rows += (f'<article class="action" id="act-{aid}"><div class="action-top"><span class="action-letter">{chr(64 + num_of[aid])}</span>'
+          f'<span class="action-status">{e(state["status"])}</span></div><h3>{e(a["do"])}</h3><p>{e(a["change"])}</p>'
+          f'<dl><div><dt>Evidence</dt><dd>{e(a["evidence"])}</dd></div><div><dt>Owner</dt><dd>{e(a["owner"])}</dd></div></dl>'
+          f'<details><summary>Measures and operational detail</summary><p><strong>Trigger:</strong> {e(a["trigger"])}</p><p>{e(a["measure"])}</p><p>{e(a["effort"])}</p>'
+          f'<ul>{details}</ul><p>Staff action register (separate from calculated flags)</p><ul>{reviews or "<li>No staff decisions recorded.</li>"}</ul></details></article>')
     versions = sorted(set('/'.join(r[k] for k in ('form_version','curriculum_version','faq_version','scenario_version')) for r in logs['sessions']))
-    plan = (f'<section class="plan" id="priorities"><div class="wrap"><div class="sec-head">'
-            '<h2>3 actionable recommendations, <em>based on data</em></h2>'
-            '<p class="sub">Proposed pilot thresholds, not rules validated by the historical survey. Call tracing here means a staff-verified teaching explanation of the call journey, privacy and location handling. '
-            'No real caller records are collected. Questions and low NPS alone do not trigger venue changes.</p>'
-            f'<p>Measurement coverage: {len(logs["sessions"])} logged events; {len(logs["assessments"])} assessment summaries. '
-            f'Policy: {e(policy["version"])}. Form/curriculum/FAQ/scenario versions: {e(", ".join(versions) or "awaiting measurement")}.</p>'
-            '<p>Missingness tolerance must be agreed before retention decisions. Small learner groups are suppressed. '
-            'Calculated flags do not close actions; staff record their review separately.</p></div>'
-            f'<div class="acts">{act_rows}</div></div></section>')
+    decisions = (f'<section class="decision-section" id="decisions"><div class="wrap"><div class="decision-grid">'
+                 f'<section class="decision-panel"><header><p class="eyebrow">What the data says</p><h2>Three supported findings</h2></header>{finding_rows}</section>'
+                 f'<section class="decision-panel actions-panel"><header><p class="eyebrow">Recommended next actions</p><h2>Test, measure, decide</h2></header>{act_rows}</section>'
+                 '</div><p class="decision-note">Actions and thresholds are proposals for staff review, not conclusions proven by the historical survey.</p>'
+                 f'<details class="measurement"><summary>Measurement and implementation context</summary><p>Measurement coverage: {len(logs["sessions"])} logged events; {len(logs["assessments"])} assessment summaries. Policy: {e(policy["version"])}. Form/curriculum/FAQ/scenario versions: {e(", ".join(versions) or "awaiting measurement")}.</p><p>Missingness tolerance must be agreed before retention decisions. Small learner groups are suppressed. Calculated flags do not close actions; staff record their review separately.</p></details></div></section>')
 
     all_up = all(num(r["value"]) > 0 for it in ITEMS for r in role_rows(groups, f"agree_change_{it[0]}") if r["status"] == "shown")
     q = themes[(themes["field"] == "improve") & (themes["id"] == "question")].set_index("group")
@@ -978,13 +974,20 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
         section("", sess_title, sess_sub, session_chart(sess, split), "Flags compare each group’s margin with the benchmark. They omit benchmark uncertainty, dependence within sessions and adjustment for repeated comparisons. Use them to generate questions, never to rank trainers or count successful sessions."),
         section("", (f"{datetime.strptime(months.idxmax(), '%Y-%m'):%B %Y} was the busiest month, with <em>{months.max():,}</em> responses") if not months.empty else "Responses by month", "Survey responses by the month they were submitted.", month_columns(months)),
     ])
+    evidence = '<section class="evidence-intro" id="evidence"><div class="wrap"><p class="eyebrow">Evidence</p><h2>Inspect the figures behind each decision</h2><p>Charts retain their exact values, margins of error, and accessible tables.</p></div></section>'
+    methods = (f'<section class="methods" id="methods"><div class="wrap"><details><summary>Methods and limits</summary><div class="methods-grid">'
+               '<p><b>Self-report, not measured learning.</b> Before and after ratings were both given after training, with “before” recalled. There is no knowledge test or comparison group.</p>'
+               f'<p><b>Nothing is dropped.</b> {h["flagged"]} responses carry a review flag and remain in the primary figures. The sensitivity sample has NPS {signed(wf["nps"])}.</p>'
+               f'<p><b>Small groups stay protected.</b> Groups and cells under {min_n} are pooled or suppressed; “thin” marks a figure with 10–29 valid answers.</p>'
+               '<p><b>Comment themes are rules, not a model.</b> They are provisional during calibration and require human review before use outside this internal analysis.</p>'
+               '</div></details></div></section>')
 
     inp = man.get("input", {})
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Survey dashboard</title><style>{font_faces()}{CSS}</style></head>
 <body>
-{hero}{key}{plan}{body}
+{hero}{decisions}{evidence}{body}{methods}</main>
 <div id="tip" role="tooltip"></div><script>{JS}</script></body></html>
 """
 

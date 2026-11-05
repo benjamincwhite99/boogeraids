@@ -71,7 +71,7 @@ def main():
         # 10 promoters, 20 passives: margin = 1.96 * sqrt((1/3 - 1/9) / 29) * 100 = 17.2
         check("NPS shown with its 95% margin of error", "NPS +33 ±17" in txt, txt[:700])
         check("action plan: each step has an owner, effort and measure",
-              "What to do next" not in txt and "3 actionable recommendations" in txt
+              "What to do next" not in txt and "Test, measure, decide" in txt
               and txt.count("Measures and operational detail") == txt.count("Trigger") == 3
               and "correct-answer" in txt, txt[txt.find("What to do next"):][:600])
         check("first run: no 'since the last run' strip", "Since the last run" not in txt)
