@@ -60,7 +60,7 @@ def main():
         check("headline: response count", "30 responses" in txt, txt[:600])
         check("headline: describe change computed from pairs (+100%)",
               "Describe 988 and how it works: +100%" in txt and "0% agreed before the training (recalled) and 100% after" in txt, txt[:900])
-        check("headline: NPS (+33)", "NPS +33" in txt, txt[:600])
+        check("headline: recommendation result (+33%)", "Would recommend +33%" in txt, txt[:600])
         check("students vs everyone else hidden when a group is under the minimum size", "Recommendation gap:" not in txt)
         check("fonts embedded in the page", page.count("data:font/woff2;base64,") == 3)
         check("no comment text in the page", SECRET.lower() not in page.lower())
@@ -69,11 +69,11 @@ def main():
         check("no half-written temp file left", not (out / ".dashboard.html.tmp").exists())
         check("every chart has a table view", page.count("Show the numbers") == 8, str(page.count("Show the numbers")))
         # 10 promoters, 20 passives: margin = 1.96 * sqrt((1/3 - 1/9) / 29) * 100 = 17.2
-        check("NPS shown with its 95% margin of error", "NPS +33 ±17" in txt, txt[:700])
-        check("action plan: each step has an owner, effort and measure",
+        check("recommendation shown with its 95% margin of error", "Would recommend +33% ±17" in txt, txt[:700])
+        check("action plan: each recommended action keeps its evidence",
               "What to do next" not in txt and "Test, measure, decide" in txt
-              and txt.count("Measures and operational detail") == txt.count("Trigger") == 3
-              and "correct-answer" in txt, txt[txt.find("What to do next"):][:600])
+              and txt.count("Why it belongs here:") == 3
+              and "Staff demonstration" in txt, txt[txt.find("Test, measure, decide"):][:1200])
         check("first run: no 'since the last run' strip", "Since the last run" not in txt)
         check("run history recorded", (out / "dashboard_history.json").exists())
 
