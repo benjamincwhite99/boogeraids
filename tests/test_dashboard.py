@@ -65,7 +65,7 @@ def main():
         check("fonts embedded in the page", page.count("data:font/woff2;base64,") == 3)
         check("no comment text in the page", SECRET.lower() not in page.lower())
         check("self-contained: no external URLs", not re.search(r"(src|href)=[\"']?(https?:)?//", page))
-        check("provisional banner while no rows are hand-checked", "Comment themes are provisional" in txt)
+        check("provisional theme note while no rows are hand-checked", "a hand check is pending" in txt)
         check("no half-written temp file left", not (out / ".dashboard.html.tmp").exists())
         check("every chart has a table view", page.count("Show the numbers") == 8, str(page.count("Show the numbers")))
         # 10 promoters, 20 passives: margin = 1.96 * sqrt((1/3 - 1/9) / 29) * 100 = 17.2

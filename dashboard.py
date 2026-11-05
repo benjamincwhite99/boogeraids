@@ -744,9 +744,9 @@ font:300 22px/1 var(--serif)}
 .since .muted{font-size:13px;margin:14px 0 0}
 .dash-head{display:flex;justify-content:space-between;align-items:center;gap:24px;min-height:72px;border-bottom:1px solid var(--hair);font-size:14px}
 .dash-head>div{display:flex;align-items:baseline;gap:18px}.dash-head .mark{letter-spacing:.08em}.dash-meta{color:var(--ash);font-variant-numeric:tabular-nums}.dash-head nav{display:flex;gap:18px}.dash-head a{color:var(--stone);text-decoration:none;font-size:13px;font-weight:600}.dash-head a:hover{text-decoration:underline;text-underline-offset:4px}
-.overview{padding:36px 0 28px;background:var(--canvas)}.overview-copy{margin-bottom:22px}.overview .eyebrow{margin:0 0 8px}.overview h1{display:grid;grid-template-columns:1fr 1fr;gap:32px;font-size:42px;line-height:1.05;max-width:none}.overview h1 span:last-child{text-align:right}.overview h1 em{font-style:italic}.overview-copy>p{max-width:32ch;margin:0 0 4px;color:var(--stone);font-size:16px;line-height:1.4}
-.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:14px;overflow:hidden}.kpi{background:var(--surface);padding:16px 18px;min-height:104px;display:flex;flex-direction:column;justify-content:space-between}.kpi span{font-size:12px;color:var(--ash);font-weight:700;letter-spacing:.06em;text-transform:uppercase}.kpi b{font:300 31px/1 var(--serif);font-variant-numeric:tabular-nums;color:var(--ink)}.kpi small{color:var(--stone);font-size:12px}.overview .pill{margin-top:14px;padding:5px 11px;font-size:12px}.overview .since{margin-top:16px;padding:16px 18px;border-radius:14px}
-.decision-section{padding:24px 0 40px}.decision-grid{display:grid;grid-template-columns:minmax(0,6fr) minmax(360px,6fr);gap:18px}.decision-panel{background:var(--surface);border:1px solid var(--hair);border-radius:16px;overflow:hidden}.decision-panel>header{padding:20px 22px 16px;border-bottom:1px solid var(--hair)}.decision-panel .eyebrow{margin:0 0 8px}.decision-panel h2{font-family:var(--sans);font-size:21px;font-weight:650;letter-spacing:-.02em;max-width:none}.signal{display:grid;grid-template-columns:28px minmax(0,1fr);gap:14px;padding:19px 22px;border-bottom:1px solid var(--hair);align-items:start}.signal:last-child,.action:last-child{border-bottom:0}.signal-num{font:600 12px/1 var(--sans);color:var(--gold);padding-top:3px}.signal h3,.action h3{font-family:var(--sans);font-size:16px;font-weight:650;letter-spacing:-.01em;line-height:1.3;margin:0 0 5px}.signal p,.action>p{font-size:13.5px;line-height:1.45;color:var(--stone);margin:0}.signal-links{display:flex;flex-wrap:wrap;gap:5px 12px;margin-top:9px}.signal-links a{font-size:12px;line-height:1.3;color:var(--olive);font-weight:650;text-decoration:none}.signal-links a:hover{text-decoration:underline}
+.overview{padding:36px 0 28px;background:var(--canvas)}.overview-copy{margin-bottom:22px}.overview .eyebrow{margin:0 0 8px}.overview h1{display:grid;grid-template-columns:1fr 1fr;gap:32px;font-size:42px;line-height:1.05;max-width:none;text-align:center}.overview h1 span:last-child{text-align:center}.overview h1 em{font-style:italic}.overview-copy>p{max-width:32ch;margin:0 0 4px;color:var(--stone);font-size:16px;line-height:1.4}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:14px;overflow:hidden}.kpi{background:var(--surface);padding:16px 18px;min-height:104px;display:flex;flex-direction:column;justify-content:space-between}.kpi span{font-size:12px;color:var(--ash);font-weight:700;letter-spacing:.06em;text-transform:uppercase}.kpi b{font:300 31px/1 var(--serif);font-variant-numeric:tabular-nums;color:var(--ink)}.kpi small{color:var(--stone);font-size:12px}.overview .since{margin-top:16px;padding:16px 18px;border-radius:14px}
+.decision-section{padding:24px 0 40px}.decision-grid{display:grid;grid-template-columns:minmax(0,6fr) minmax(360px,6fr);gap:18px}.decision-panel{background:var(--surface);border:1px solid var(--hair);border-radius:16px;overflow:hidden}.decision-panel>header{padding:20px 22px 16px;border-bottom:1px solid var(--hair)}.decision-panel .eyebrow{margin:0 0 8px}.decision-panel h2{font-family:var(--sans);font-size:21px;font-weight:650;letter-spacing:-.02em;max-width:none}.signal{display:grid;grid-template-columns:28px minmax(0,1fr);gap:14px;padding:19px 22px;border-bottom:1px solid var(--hair);align-items:start}.signal:last-child,.action:last-child{border-bottom:0}.signal-num{font:600 12px/1 var(--sans);color:var(--gold);padding-top:3px}.signal h3,.action h3{font-family:var(--sans);font-size:16px;font-weight:650;letter-spacing:-.01em;line-height:1.3;margin:0 0 5px}.signal p,.action>p{font-size:13.5px;line-height:1.45;color:var(--stone);margin:0}
 .action{padding:19px 22px;border-bottom:1px solid var(--hair);scroll-margin-top:20px}.action h3{margin-bottom:8px}.action-evidence{margin-top:11px!important;padding-top:10px;border-top:1px solid var(--hair);font-size:12px!important}.action-evidence b{color:var(--ink)}.decision-note{font-size:12px;color:var(--ash);margin:12px 2px}.measurement{margin:18px 0 0;border-top:1px solid var(--hair);padding-top:14px;font-size:13px;color:var(--stone)}.measurement summary{cursor:pointer;font-weight:650;color:var(--ink)}.measurement p{max-width:80ch;margin:9px 0}
 main>section:not(.overview):not(.decision-section):not(.methods){padding:36px 0}main>section:not(.overview):not(.decision-section):not(.methods) .wrap{max-width:1280px}main>section:not(.overview):not(.decision-section):not(.methods) .sec-head{display:flex;gap:24px;align-items:baseline;margin-bottom:14px}main>section:not(.overview):not(.decision-section):not(.methods) h2{font-family:var(--sans);font-size:21px;font-weight:650;max-width:30ch}main>section:not(.overview):not(.decision-section):not(.methods) .sec-head .sub{font-size:13px;margin:0;max-width:58ch}.card{border-radius:16px;padding:22px}.methods{padding:32px 0 56px}.methods details{border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:17px 0}.methods summary{font:650 18px/1.3 var(--sans);cursor:pointer}.methods-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 32px;margin-top:12px}.methods-grid p{font-size:13px;line-height:1.45;color:var(--stone);margin:10px 0}.methods-grid b{color:var(--ink)}
 @media (max-width:640px){.wrap{padding:0 16px}.act{grid-template-columns:1fr;padding:20px}.al{width:36px;height:36px;font-size:18px}
@@ -903,13 +903,7 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
     when = next(i for i in h["items"] if i["key"] == "when")
     checked = int(tman.get("validation", {}).get("rows_checked", 0))
     span = (f"{h['first']:%b %Y} – {h['last']:%b %Y}" if pd.notna(h["first"]) else "dates unknown")
-
-    status = ("Comment themes are provisional: hand check pending" if not checked
-              else f"Comment themes remain provisional: {checked} of "
-                   f"{tman.get('validation', {}).get('rows_total', checked)} review entries scored; "
-                   "calibration sample, not held-out accuracy")
     fs, acts = findings(h, themes, sess)
-    num_of = {aid: i for i, aid in enumerate(acts, 1)}
     kpis = "".join([
         f'<div class="kpi"><span>Describe 988</span><b>{signed(next(i for i in h["items"] if i["key"] == "describe")["gain"])}%</b><small>self-rated change</small></div>',
         f'<div class="kpi"><span>Know when to use it</span><b>{signed(when["gain"])}%</b><small>self-rated change</small></div>',
@@ -921,10 +915,9 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
 <nav aria-label="Dashboard sections"><a href="#decisions">Decisions</a><a href="#evidence">Evidence</a><a href="#methods">Methods</a></nav></header>
 <main>
 <section class="overview" id="overview"><div class="wrap"><div class="overview-copy"><h1><span><em>Three</em> findings.</span><span><em>Three</em> next actions.</span></h1></div>
-<div class="kpis">{kpis}</div><div class="pill"><i></i>{e(status)}</div>{since_html(previous, snapshot(data, h))}</div></section>"""
+<div class="kpis">{kpis}</div>{since_html(previous, snapshot(data, h))}</div></section>"""
     finding_rows = "".join(
-        f'<article class="signal"><span class="signal-num">{i:02d}</span><div><h3>{t}</h3><p>{e(p)}</p></div>'
-        f'<div class="signal-links">' + "".join(f'<a href="#act-{aid}">{e(acts[aid]["short"])}</a>' for aid in ids) + "</div></article>"
+        f'<article class="signal"><span class="signal-num">{i:02d}</span><div><h3>{t}</h3><p>{e(p)}</p></div></article>'
         for i, (t, p, ids) in enumerate(fs, 1))
     logs, policy = data.get('interventions', ({k: [] for k in interventions.FIELDS}, interventions.DEFAULT))
     states = interventions.evaluate(logs, policy, min_n)
@@ -943,7 +936,7 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
     decisions = (f'<section class="decision-section" id="decisions"><div class="wrap"><div class="decision-grid">'
                  f'<section class="decision-panel"><header><p class="eyebrow">What the data says</p><h2>Three supported findings</h2></header>{finding_rows}</section>'
                  f'<section class="decision-panel actions-panel"><header><p class="eyebrow">Recommended next actions</p><h2>Test, measure, decide</h2></header>{act_rows}</section>'
-                 '</div><p class="decision-note">Actions and thresholds are proposals for staff review, not conclusions proven by the historical survey.</p>'
+                 '</div>'
                  f'<details class="measurement"><summary>Measurement and implementation context</summary><p>Measurement coverage: {len(logs["sessions"])} logged events; {len(logs["assessments"])} assessment summaries. Policy: {e(policy["version"])}. Form/curriculum/FAQ/scenario versions: {e(", ".join(versions) or "awaiting measurement")}.</p><p>Missingness tolerance must be agreed before retention decisions. Small learner groups are suppressed. Calculated flags do not close actions; staff record their review separately.</p></details></div></section>')
 
     all_up = all(num(r["value"]) > 0 for it in ITEMS for r in role_rows(groups, f"agree_change_{it[0]}") if r["status"] == "shown")
@@ -976,7 +969,7 @@ def build(data: dict, min_n: int, previous: dict | None = None) -> str:
                '<p><b>Self-report, not measured learning.</b> Before and after ratings were both given after training, with “before” recalled. There is no knowledge test or comparison group.</p>'
                f'<p><b>Nothing is dropped.</b> {h["flagged"]} responses carry a review flag and remain in the primary figures. The sensitivity sample has NPS {signed(wf["nps"])}.</p>'
                f'<p><b>Small groups stay protected.</b> Groups and cells under {min_n} are pooled or suppressed; “thin” marks a figure with 10–29 valid answers.</p>'
-               '<p><b>Comment themes are rules, not a model.</b> They are provisional during calibration and require human review before use outside this internal analysis.</p>'
+               f'<p><b>Comment themes are rules, not a model.</b> ' + ("They are provisional during calibration; a hand check is pending." if not checked else f"They remain provisional: {checked} of {tman.get('validation', {}).get('rows_total', checked)} review entries scored; calibration, not held-out accuracy.") + '</p>'
                '</div></details></div></section>')
 
     inp = man.get("input", {})
