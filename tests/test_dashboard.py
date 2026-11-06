@@ -13,6 +13,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
@@ -59,25 +61,28 @@ def main():
         txt = text_of(page)
         check("headline: response count", "30 responses" in txt, txt[:600])
         check("headline: describe change computed from pairs (+100%)",
-              "Describe 988 and how it works: +100%" in txt and "0% agreed before the training (recalled) and 100% after" in txt, txt[:900])
-        check("headline: recommendation result (+33%)", "Would recommend +33%" in txt, txt[:600])
+              "Describe 988 and how it works: 100.0% after training" in txt
+              and "0.0% agreed before → 100.0% after (+100.0 points" in page, txt[:900])
+        check("headline: recommendation result (+33%)", "All respondents: NPS +33" in page, txt[:600])
         check("students vs everyone else hidden when a group is under the minimum size", "Recommendation gap:" not in txt)
         check("fonts embedded in the page", page.count("data:font/woff2;base64,") == 3)
         check("no comment text in the page", SECRET.lower() not in page.lower())
         check("self-contained: no external URLs", not re.search(r"(src|href)=[\"']?(https?:)?//", page))
         check("provisional theme note while no rows are hand-checked", "a hand check is pending" in txt)
         check("no half-written temp file left", not (out / ".dashboard.html.tmp").exists())
-        check("every chart has a table view", page.count("Show the numbers") == 8, str(page.count("Show the numbers")))
-        # 10 promoters, 20 passives: margin = 1.96 * sqrt((1/3 - 1/9) / 29) * 100 = 17.2
-        check("recommendation shown with its 95% margin of error", "Would recommend +33% ±17" in txt, txt[:700])
+        check("every chart has a table view", page.count("Show the numbers") == 7, str(page.count("Show the numbers")))
+        check("one session: no falsely precise respondent-level NPS margin",
+              "All respondents: NPS +33, n = 30" in page and "All respondents: NPS +33, margin" not in page, txt[:700])
         check("action plan: each recommended action keeps its evidence",
               "What to do next" not in txt and "Test, measure, decide" in txt
-              and txt.count("Why it belongs here:") == 3
+              and "Why it belongs here:" not in txt
               and "Staff demonstration" in txt, txt[txt.find("Test, measure, decide"):][:1200])
         check("first run: no 'since the last run' strip", "Since the last run" not in txt)
         check("run history recorded", (out / "dashboard_history.json").exists())
 
         import dashboard
+        check("modified NPS excludes exact 5 ratings from the denominator",
+              dashboard.nps(pd.Series([5, 5, 10])) == 100)
         data = dashboard.load(out)
         check("explorer is not rendered", "Check any figure for your own audience" not in txt and 'id="xdata"' not in page)
         cube = dashboard.explore_cube(data["clean"], 10)
@@ -117,7 +122,7 @@ def main():
         check("reversed audience gap: describes other respondents as lower",
               "Other respondents give lower recommendation scores" in revised)
         check("session benchmark: explicit exploratory limitations",
-              "not a validated prediction" in revised and "benchmark uncertainty" in revised
+              "not a validated prediction" in revised and "without respondent-level margins" in revised
               and "audience predicts" not in revised)
         fs, acts = dashboard.findings(dashboard.headline(rev["clean"], 10), rev["themes"], {})
         check("priorities remain bounded with actionable new measures",

@@ -48,6 +48,7 @@ def main(argv=None):
         step("Intervention tests", [HERE / "tests" / "test_interventions.py"])
         step("Dashboard tests", [HERE / "tests" / "test_dashboard.py"])
         step("Preflight tests", [HERE / "tests" / "test_preflight.py"])
+        step("Dashboard updater tests", [HERE / "tests" / "test_intake_server.py"])
     step("Clean", [HERE / "clean.py", a.input, "--config", a.config, "--out", a.out])
     step("Validate", [HERE / "validate_clean.py", a.input, "--config", a.config, "--out", a.out])
     step("Themes", [HERE / "themes.py", "--config", a.config, "--out", a.out])

@@ -74,22 +74,31 @@ python3 tests/test_dashboard.py        # synthetic tests
 
 ### New-export intake check
 
-Before running a newer export, launch a local drag-and-drop compatibility check:
+For the easiest workflow on a Mac, double-click **`Open EveryMind Dashboard.command`**. On first launch it creates an isolated Python environment and installs the required packages; later launches reuse it. The browser screen lets a nontechnical user:
+
+1. Drag in a new Microsoft Forms `.xlsx` or `.csv` export.
+2. Review the compatibility check before anything changes.
+3. Click **Update all charts** to run cleaning, independent validation, theme coding and dashboard generation.
+4. Open the refreshed dashboard directly from the success screen.
+
+The updater runs only on `127.0.0.1`, so the survey file stays on the computer. Only one update can run at a time. If a pipeline step fails or times out, the previous `output/` folder is restored and remains available.
+
+The same update screen can be launched from a terminal:
 
 ```bash
-python3 intake_server.py                # open http://127.0.0.1:8765
+python3 intake_server.py --open
 # or, for a terminal/automation check:
 python3 preflight.py new_export.xlsx
 ```
 
-It never changes `output/`. It reports the row count, required-column mapping, unused new columns, and labels that the current configuration would flag, so staff can fix a changed Forms export before publishing a dashboard.
+The first stage never changes `output/`: it reports the row count, required-column mapping, unused new columns, and labels that the current configuration would flag. The dashboard changes only after the user clicks **Update all charts** and the full pipeline completes.
 
-Writes `output/dashboard.html`, a one-page visual report that opens in any browser, offline, and works at phone width. It leads with the headline result and a short list of findings, then covers self-rated change by role, NPS by role, what students and everyone else found most valuable, what the "improve" box was used for, the questions people still had, suggested improvements, responses by month, and the caveats to read before using any number. All group tables are at the end.
+Writes `output/dashboard.html`, a one-page visual report that opens in any browser, offline, and works at phone width. It leads with the headline result and a short list of findings, then covers self-rated change by role, NPS by role, how the "improve" box was used, the questions people still had, suggested improvements, responses by month, and the caveats to read before using any number. All group tables are at the end.
 
 - **Written from the data.** Every headline and finding is generated from this run's numbers, and a finding only appears when the data supports it, so a new export needs no editing.
-- **Next steps.** Three actionable recommendations, each grounded in the survey data: a staff-demonstrated 988 call, student-specific training, and environmental changes (quieter room, better microphone). Each shows evidence, a specific action, proposed trigger, owner and measure. Owners are roles for EveryMind to assign.
-- **Margins of error.** NPS and self-rated changes show a 95% margin of error (adjusted-Wald for NPS; each person's own before/after change for the gains). They cover random variation only, not who chose to answer or recall bias.
-- **Exploratory session diagnostics.** Date × county groups are proxies, not verified events. Each group with at least 10 ratings shows NPS and its margin alongside a descriptive audience benchmark calculated from this same dataset. Flags omit benchmark uncertainty and adjustment for repeated comparisons; they are not validated predictions. Smaller sessions are pooled, and if the pool would be under 10 the smallest shown session joins it. It's a prompt to look into a session, not a trainer rating.
+- **Next steps.** Three actionable recommendations, each grounded in the survey data: a staff-demonstrated 988 call, a three-item knowledge check before any content-adaptation trigger is activated, and environmental changes (quieter room, better microphone). Each shows its evidence and measurement readiness.
+- **NPS treatment and uncertainty.** At the judge's request, exact 5 ratings are excluded from the NPS denominator everywhere; the dashboard labels this modified calculation explicitly. Overall and role-level NPS and self-rated changes use session-cluster-aware 95% margins, treating date × county as the available session proxy. They allow responses from one delivery to move together, but still do not cover who chose to answer, recall bias or an incorrect session proxy.
+- **Exploratory session diagnostics.** Date × county groups are proxies, not verified events. Each group with at least 10 ratings shows descriptive NPS alongside a descriptive audience benchmark calculated from this same dataset. Per-session margins and significance flags are deliberately omitted because respondents within one delivery are not independent. Smaller sessions are pooled, and if the pool would be under 10 the smallest shown session joins it. It's a prompt to look into a session, not a trainer rating.
 - **Explore.** Filters for county, role and "leave out flagged responses", working offline in the page. Counties are pooled as in `group_tables.csv`. A selection is only published if it has at least 10 responses and, within each filter, the unpublished selections add up to 0 or at least 10, so no small group can be found by subtracting one view from a broader one. Menu options that can't be shown are marked "(too few)".
 - **Since the last run.** Each run records its aggregate figures in `output/dashboard_history.json` (one entry per export and settings, last 20). The next run with a different export or config shows the changes at the top of the page.
 - **Hover or tab to any mark** for exact figures. Every chart has a "Show the numbers" table.
